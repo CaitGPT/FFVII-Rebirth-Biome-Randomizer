@@ -12,7 +12,7 @@ An ordinary-looking row turned out to have story and reset references. We left i
 
 ## Keeping the first change small
 
-Earlier local mod research reported that adding a new territory row could break simulator fights. We did not reproduce that experiment here. The prototype edits existing rows and adds nothing. It leaves two Orcs in place and chooses whether their companion is a Mandragora or a Kalm Fang, keeping the same levels and number of enemies.
+Earlier local mod research reported that adding a new territory row could break simulator fights. We did not reproduce that experiment here. The prototype edits existing rows and adds nothing. The first candidate exchanged Mandragora and Kalm Fang; the category investigation below explains why the default pool now exchanges Mu and Kalm Fang. It leaves two Orcs in place and keeps the same levels and number of enemies.
 
 This is a narrow starting point. It lets us test a real change without claiming that every enemy in the region belongs in every arena.
 
@@ -48,4 +48,8 @@ Asset preloading, rooted retention, ForceCreateActor and their combination did n
 
 A request-only read-only diagnostic then inspected69 actual server-build actors. Camp05 had12 medium ground spawn transforms and zero small ones. The native Mandragora/Orc camps01 and02 had both small and medium lists. Their sampled positions matched. Other researched size1-only targets also had only medium lists; native Levrikon-only camp13 had large points. This is much stronger evidence for a size-specific spawn capacity boundary, though it still needs a controlled correction before claiming the crash's cause.
 
-The current experiment supplies only camp05's missing small list from that arena's existing medium transforms. It first keeps the known working Mu composition to check the reflected write and readback. Mandragora must subsequently spawn and complete the original encounter before this can be accepted as a cross-category solution. The diagnostic is private and not part of the release yet.
+The scoped experiment supplied only camp05's missing small list from that arena's existing medium transforms. A Mu control verified all twelve transforms; an independent comparison over69 actors found no other array-count change. The previously crashing Mandragora1+Orc2 package then spawned and fought, although the party lost on Hard.
+
+The owner proposed isolating one enemy rather than changing difficulty. A separate diagnostic shortened five camp05 frozen-array logical lengths to1 while retaining their capacity, backing storage and the original package size. Complete DataBuilder exports showed only the intended five properties changed, and retoc decoded the packed payload exactly. One Mandragora spawned and the fight completed on Hard, with explicit defeat/reward messages and return to the field. Cloud stayed at901HP. No chapter restart, difficulty change or healing command was used. The five synthetic Lua guard tests passed under Lua5.4; they are separate from this native evidence.
+
+The [experimental source](../experimental/arena-correction/README.md) preserves that narrow result and the failed controls. The default randomizer still uses size-matched compositions and requires no Lua companion. One-enemy completion does not substitute for the full seeded-pool acceptance or prove every mixed group is safe.

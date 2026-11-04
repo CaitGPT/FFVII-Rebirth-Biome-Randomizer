@@ -24,6 +24,12 @@ Do not mark issue #44 complete until the requested native seeded traversal, comp
 
 The private matched-size single-target package passed Ranch travel, exact simultaneous territory-tagged Mu1+Orc2 inventory, battle initiation, ordinary enemy behavior and encounter completion at05. Native reward messages reported Mu defeated and EXP/AP/gil; fresh field telemetry and a window capture confirmed the return to the arena. No healing/revive command was sent to Cloud. Slot22 is the owner's backed-up near-camp checkpoint; it is not a model run assignment. A verified reload returned to that exact position.
 
-The final algorithm-v2 generated package and remaining three arenas have not yet passed native acceptance. The original Mandragora attempts, raw/Zlib packaging failures and the unrelated unmodified transit-battle loss remain retained. Do not conflate these outcomes.
+The full algorithm-v2 seed3 package then loaded successfully without any experimental arena scripts. Complete actor inventory simultaneously showed exact Mu1+Orc2 groups at05,23 and29. A controlled189m route reached29; its native combat completed, with Orc A defeated,2096EXP/3AP and235gil messages and a verified field return. Cloud ended199HP; no healing/revival was issued. Camp30 remains unverified: a later route timed out and a requested fast-travel spot was unavailable. Full recording19-31-03.mkv and failure evidence are retained. Alternate seed6 and original-seed replay remain pending.
+
+The separate Mandragora arena correction passed one-enemy spawning, combat and completion on Hard. The original three-enemy group spawned and fought with the correction, but the party lost. Preserve that distinction. See [experimental evidence boundaries](../experimental/arena-correction/README.md).
+
+The original Mandragora attempts, raw/Zlib packaging failures and the unrelated unmodified transit-battle loss remain retained. Do not conflate these outcomes.
 
 The manual-command fight exposed an evidence-hook limitation: registering and beginning a production context worked, but ending it refused because manual fights supply no completed routeResult. The context is unknown, not verified. Keep the direct native evidence and full recording; never manufacture a route result to make the event succeed.
+
+The owner subsequently specified runtime rerolling on each cleared-camp respawn for1.0.0 and a [final regression/conflict review](RELEASE-QA.md). Build-time baseline results cannot pass that runtime release gate.

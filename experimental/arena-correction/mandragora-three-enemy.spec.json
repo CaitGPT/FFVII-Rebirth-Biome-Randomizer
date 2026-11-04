@@ -1,0 +1,18 @@
+{
+  "tables": [
+    {
+      "asset": "DataObject/Field/1200-GRASA/EnemyTerritory.uasset",
+      "rows": [
+        {
+          "name": "Grassland_mob_05",
+          "set": {
+            "MobTemplateList_Array": [
+              "mobgrasa_Mandragora_00",
+              "mobgrasa_Ogre_Orc_00"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
