@@ -38,7 +38,13 @@ The original container also carries an unexplained nonzero field and data after 
 
 A valid Rebirth-shaped empty header with the unchanged asset stored raw still crashed. A further control retained that header and directory but copied the asset's exact original Oodle-compressed block and original SHA-1/compression metadata. That control loaded the same save and successfully reached Bill's Ranch. A second no-mod baseline also reached the Ranch with the current harness. The source asset block is short (24,160 raw bytes) and begins at a 64 KiB boundary, so a short block or within-block offset alone does not explain the difference.
 
-The new builder compresses edited table data through the owner's installed Oodle library, verifies exact decompression, writes the reviewed legacy layout and independently reads every resulting chunk again. An additional archive reader recovered the edited table's exact SHA-256. The new codec's output and actual enemy substitutions still require native testing; the successful original-block control does not by itself prove that the randomizer works.
+The new builder compresses edited table data through the owner's installed Oodle library, verifies exact decompression, writes the reviewed legacy layout and independently reads every resulting chunk again. An additional archive reader recovered the edited table's exact SHA-256. A freshly generated no-op override then loaded the registered working save and reached Bill's Ranch. This establishes native compatibility for the writer with unchanged data.
+
+## Substitution initialization remains unresolved
+
+The same writer with the one-encounter Kalm Fang to Mandragora substitution crashed before a verified save load. A separate two-asset diagnostic set the existing Mandragora mob template's ForceCreateActor flag while preserving all other mob properties. It loaded the working save successfully but crashed during Grasslands travel. The failed dumps and full recordings are retained; neither build is a release candidate.
+
+The substitution crash differs from the raw-archive controls. Its top instruction reads a transform-sized array through a null base. This is evidence about the failing instruction, not proof of the original cause. The next diagnostic tests replacement-asset availability. Training Dummy's placed-actor requirement remains relevant, and no assumption that swapping table names alone is safe has passed native acceptance.
 
 ## References
 
