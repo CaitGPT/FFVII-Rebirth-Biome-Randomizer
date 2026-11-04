@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "algorithm": "sha256-encounter-v1",
+  "schema_version": 2,
+  "algorithm": "sha256-encounter-v2",
   "assets": {
     "territory": {
       "path": "DataObject/Field/1200-GRASA/EnemyTerritory.uasset",
@@ -9,23 +9,86 @@
     "mob": {
       "path": "DataObject/Field/1200-GRASA/EnemyTerritoryMob.uasset",
       "sha256": "7e49f9fee65c5e01ca151dd4f4ed0e443f534e52277b8227e309b5044220a983"
+    },
+    "battle": {
+      "path": "DataObject/Resident/BattleCharaSpec.uasset",
+      "sha256": "fb9af7b9a5defa79b1b4c36d4bd0386f16dae1d5bcffbe3151758979f5322efe"
+    },
+    "character": {
+      "path": "DataObject/Resident/CharaSpec.uasset",
+      "sha256": "7bdb8f1fa8c975da4f2811afe0cee12233114f758491aa734c1c8214ad531eab"
     }
   },
   "pools": [
     {
-      "id": "grasslands-plains-level15",
+      "id": "grasslands-plains-level15-size1",
       "region": "1200-GRASA",
-      "native_validation": "pending",
-      "rationale": "Existing ordinary three-enemy Grasslands compositions, one small ground enemy and two Orcs, all level 15. Only the small enemy changes. Swamp, story, media, rare and authored encounters are excluded.",
-      "targets": ["Grassland_mob_02", "Grassland_mob_05", "Grassland_mob_23", "Grassland_mob_29", "Grassland_mob_30"],
-      "donors": ["Grassland_mob_02", "Grassland_mob_05"],
-      "small_mobs": {
-        "mobgrasa_Mandragora_00": "EN2205_00_Mandragora_StandardEnd2",
-        "mobgrasa_KalmFang_00": "EN2000_05_GuardHound_KalmFangEnd2"
+      "native_validation": "camp05-mu-completion-observed; remaining arenas and seed replay pending",
+      "rationale": "Ordinary level-15 ground encounters with exact PhysiqueSize 1. The single Kalm Fang may become a Mu, retaining two Orcs and all target counts. Native donor 18 has two Mu; only its species list is reused. Mandragora size 0 is excluded after native crash investigation.",
+      "targets": [
+        "Grassland_mob_05",
+        "Grassland_mob_23",
+        "Grassland_mob_29",
+        "Grassland_mob_30"
+      ],
+      "original_templates": [
+        "mobgrasa_KalmFang_00",
+        "mobgrasa_Ogre_Orc_00"
+      ],
+      "donors": {
+        "Grassland_mob_05": {
+          "templates": [
+            "mobgrasa_KalmFang_00",
+            "mobgrasa_Ogre_Orc_00"
+          ],
+          "counts": [
+            1,
+            2
+          ]
+        },
+        "Grassland_mob_18": {
+          "templates": [
+            "mobgrasa_Mu_00",
+            "mobgrasa_Ogre_Orc_00"
+          ],
+          "counts": [
+            2,
+            2
+          ]
+        }
       },
-      "fixed_mob": {"id": "mobgrasa_Ogre_Orc_00", "spec": "EN2211_01_Ogre_OrcEnd2"},
-      "levels": [15, 15],
-      "counts": [1, 2]
+      "enemies": {
+        "mobgrasa_KalmFang_00": {
+          "battle_spec": "EN2000_05_GuardHound_KalmFangEnd2",
+          "chara_spec": "EN2000_05_GuardHound_KalmFangEnd2",
+          "hp_coefficient": 230
+        },
+        "mobgrasa_Mu_00": {
+          "battle_spec": "EN2204_00_Mu_StandardEnd2",
+          "chara_spec": "EN2204_00_Mu_StandardEnd2",
+          "hp_coefficient": 100
+        },
+        "mobgrasa_Ogre_Orc_00": {
+          "battle_spec": "EN2211_01_Ogre_OrcEnd2",
+          "chara_spec": "EN2211_01_Ogre_OrcEnd2",
+          "hp_coefficient": 200
+        }
+      },
+      "fixed_mob": "mobgrasa_Ogre_Orc_00",
+      "physique_size": 1,
+      "move_type": 0,
+      "hp_budget_ratio": [
+        0.75,
+        1.0
+      ],
+      "levels": [
+        15,
+        15
+      ],
+      "counts": [
+        1,
+        2
+      ]
     }
   ]
 }

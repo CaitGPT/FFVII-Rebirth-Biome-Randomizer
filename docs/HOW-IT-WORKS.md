@@ -2,11 +2,13 @@
 
 ## Reviewed scope
 
-The input table contains forty-four rows. Five are explicitly selected: `Grassland_mob_02`, `Grassland_mob_05`, `Grassland_mob_23`, `Grassland_mob_29` and `Grassland_mob_30`. The two donor compositions come from the first two of those rows. All have levels `[15,15]`, minimum and maximum counts `[1,2]`, and the same field AI. A Mandragora or Kalm Fang occupies the first entry, and Orcs occupy the second.
+The input territory table contains forty-four rows. Four are selected explicitly: `Grassland_mob_05`, `Grassland_mob_23`, `Grassland_mob_29` and `Grassland_mob_30`. Each originally has one Kalm Fang and two Orcs, levels `[15,15]`, counts `[1,2]`, and field AI `[1,1]`. The alternate species list comes from ordinary native donor18 (Mu2+Orc2); only the species list is used, so each target retains Mu1+Orc2.
 
-The mapping between mob IDs and character specs is checked in the original regional `EnemyTerritoryMob` table. Neither enemy names alone nor the region prefix authorizes an encounter. The source table hashes and the exact allowlist establish the reviewed input version and scope. Native tests must establish which physical arena each target uses and whether the swap behaves correctly there.
+The original regional mob table maps templates to BattleCharaSpec, and the resident BattleCharaSpec table maps those to CharaSpec. All three pool enemies have exact PhysiqueSize1 and MoveType0. The build binds all four original asset hashes and validates these mappings, HPDirect0 and exact HP coefficients. A target-population-weighted HP coefficient budget is630 for Kalm1+Orc2 and500 for Mu1+Orc2 (79.4%). This bounds one dimension of difficulty; it is not an equal-difficulty claim.
 
-The story/reset-linked `Grassland_mob_01` and its Media variant are deliberately excluded. A search of all local indexed CSV tables found exact references for the five candidate IDs only in the regional EnemyTerritory table. This is useful classification evidence, but it is not proof about every map script or hard-coded game behavior. Protected encounter regression testing remains required.
+Mandragora has size0 and is excluded, including its native territory02. The prior Mandragora design crashed; the matched-size Mu replacement at05 spawned correctly and completed in game. See [the compatibility investigation](COMPATIBILITY.md). Matching categories establishes candidates, not universal swap acceptance.
+
+The story/reset-linked territory01 and its Media variant, swamp, rare, hunt, quest and boss encounters are excluded. Neither enemy names nor a region prefix authorizes a target. Structural source checks and the exact allowlist constrain the change; map scripts and encounter completion still require native evidence.
 
 ## Selection
 
@@ -16,7 +18,7 @@ The builder changes only `MobTemplateList_Array` in selected rows whose choice d
 
 ## Verification
 
-The builder first verifies original binary SHA-256 hashes, exports the tables using DataBuilder's long CSV format, and checks each reviewed target and donor's structural constraints and mob-to-spec references. DataBuilder edits and rereads its own result. A separate Python comparison rereads the output CSV and requires the exact expected change in every row and property. Original input hashes are checked again before success.
+The builder first verifies original binary SHA-256 hashes, exports the tables using DataBuilder's long CSV format, and checks each reviewed target and donor's structural constraints, count budgets and complete character mapping. DataBuilder edits and rereads its own result. A separate Python comparison rereads the output CSV and requires the exact expected change in every row and property. Original input hashes are checked again before success.
 
 The audit records the algorithm, seed, catalog and input hashes, per-target selections, modified asset hash and complete package hashes. Every IoStore block is decompressed and the packed asset is compared with the independently verified table. The final archive uses native Oodle compression, version-2 TOC fields, SHA-1 metadata and a valid Rebirth-shaped empty container header. The existing game's package-store metadata describes this existing asset. Generated packages remain labelled `packed_unvalidated` until a separate native test supplies evidence. The [packaging investigation](PACKAGING-INVESTIGATION.md) records the failed controls and why copying arbitrary UCAS prefix bytes was removed.
 

@@ -10,5 +10,7 @@ build/
 *.utoc
 *.zip
 *.csv
+!docs/enemy-categories.csv
+!docs/grasslands-spawn-capacity.csv
 *.bin
 *-mod.md

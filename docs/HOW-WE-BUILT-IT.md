@@ -39,3 +39,13 @@ These checks establish properties of the generator and its output. They do not s
 | Project gameplay harness and OBS bridge | Controlled native tests and recorded evidence |
 
 The existing Gameplay Enhancement mod's Enemy Density description demonstrates related spawn-count editing. Its permissions prohibit reuse without permission. No files or implementation from that mod were used. The research link is in the status ledger.
+
+## The size-specific spawn-list investigation
+
+The first design treated Mandragora and Kalm Fang as small ground enemies. That classification was too loose. Original CharaSpec data gives Mandragora PhysiqueSize0, Kalm Fang/Mu/Orc1, Levrikon2 and Elphadunk3. Ground MoveType0 alone does not make them interchangeable. The generator now checks the numeric categories and the complete regional mob to BattleCharaSpec to CharaSpec chain.
+
+Asset preloading, rooted retention, ForceCreateActor and their combination did not fix the Mandragora crash. A same-size Mu replacement did: exact territory-tagged Mu1+Orc2 actors spawned at05, fought and cleared, with native defeat/reward messages and return to field. The owner's new slot22 checkpoint beside the camp made repeat loads much faster. It is separately backed up and never reassigned as a registered model run.
+
+A request-only read-only diagnostic then inspected69 actual server-build actors. Camp05 had12 medium ground spawn transforms and zero small ones. The native Mandragora/Orc camps01 and02 had both small and medium lists. Their sampled positions matched. Other researched size1-only targets also had only medium lists; native Levrikon-only camp13 had large points. This is much stronger evidence for a size-specific spawn capacity boundary, though it still needs a controlled correction before claiming the crash's cause.
+
+The current experiment supplies only camp05's missing small list from that arena's existing medium transforms. It first keeps the known working Mu composition to check the reflected write and readback. Mandragora must subsequently spawn and complete the original encounter before this can be accepted as a cross-category solution. The diagnostic is private and not part of the release yet.

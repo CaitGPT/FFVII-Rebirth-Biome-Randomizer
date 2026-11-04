@@ -56,7 +56,8 @@ def build(config: dict, seed: str, execute: bool = False, pack: bool = False, on
     for role, path in inputs.items():
         run(["dotnet", builder, "export", path, output / f"{role}.csv"])
     before = load_export(output / "territory.csv")
-    spec, audit = make_plan(catalog, before, load_export(output / "mob.csv"), seed, only)
+    spec, audit = make_plan(catalog, before, load_export(output / "mob.csv"),
+                            load_export(output / "battle.csv"), load_export(output / "character.csv"), seed, only)
     audit["inputs"] = {role: {"asset": catalog["assets"][role]["path"], "sha256": sha256(path)} for role, path in inputs.items()}
     audit["catalog_sha256"] = sha256(catalog_path)
     audit["mode"] = "plan"
