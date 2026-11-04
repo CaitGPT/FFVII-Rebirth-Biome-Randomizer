@@ -1,0 +1,236 @@
+local Lifecycle=require('lifecycle')
+local StateStore=require('state_store')
+local json=require('biome_json')
+local M={}
+local ids={'Grassland_mob_05','Grassland_mob_23','Grassland_mob_29','Grassland_mob_30'}
+local pools={};for _,camp in ipairs(ids) do pools[camp]={0,1} end
+local asset_path='/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory'
+local asset_full='EndDataObjectEnemyTerritory '..asset_path
+local first_names={'mobgrasa_KalmFang_000','mobgrasa_Mu_000'}
+local specs={'CharaSpec_EN2000_05_GuardHound_KalmFangEnd2','CharaSpec_EN2204_00_Mu_StandardEnd2'}
+local orc_spec='CharaSpec_EN2211_01_Ogre_OrcEnd2'
+local function valid(object)
+    local ok,result=pcall(function() return object and object:IsValid() end)
+    return ok and result==true
+end
+local function resolve(path)
+    local ok,object=pcall(StaticFindObject,path)
+    if ok and valid(object) then return object end
+    ok,object=pcall(FindObject,nil,nil,path,false)
+    if ok and valid(object) then return object end
+end
+local function cdo(name)
+    return resolve('/Script/EndGame.Default__'..name) or resolve('/Script/EndDataBase.Default__'..name)
+end
+local function text(value) return value and value:ToString() or '' end
+local function emit(event,fields)
+    fields=fields or {};fields.event=event;fields.at_utc=os.date('!%Y-%m-%dT%H:%M:%SZ')
+    print('[BiomeRandomizerRuntime] '..json.encode(fields)..'\n')
+end
+function M.new(config)
+    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},engine_path=nil,asset_scan_at=0}
+    local function fail(reason)
+        if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
+    end
+    local function asset()
+        local object=resolve(asset_path)
+        if valid(object) and object:GetFullName()==asset_full then return object end
+        if os.time()<=self.asset_scan_at then return nil end
+        self.asset_scan_at=os.time()
+        for _,candidate in ipairs(FindAllOf('EndDataObjectEnemyTerritory') or {}) do
+            if valid(candidate) and candidate:GetFullName()==asset_full then return candidate end
+        end
+    end
+    local function pawn()
+        local engine=self.engine_path and resolve(self.engine_path)
+        if not valid(engine) then
+            engine=FindFirstOf('GameEngine')
+            if valid(engine) then self.engine_path=engine:GetFullName():match('^[^ ]+ (.+)$') end
+        end
+        if not valid(engine) then return nil end
+        local viewport=engine.GameViewport;local statics=resolve('/Script/Engine.Default__GameplayStatics')
+        if not valid(viewport) or not valid(statics) then return nil end
+        local actor=statics:GetPlayerPawn(viewport,0)
+        if not valid(actor) then return nil end
+        local class=actor:GetClass():GetFName():ToString()
+        if not class:match('^PC%d%d%d%d_') and not class:match('^VE%d%d%d%d_') then return nil end
+        if not actor:GetFullName():find('/Game/Level/Game/EndGame.EndGame:',1,true) then return nil end
+        return actor
+    end
+    local function table_status(object)
+        local result=json.decode(BiomeRandomizerTableStatus(object:GetAddress()))
+        if not result.ok then error('table_guard:'..tostring(result.reason)) end
+        return result
+    end
+    local function expect_references(object,status)
+        local token=tostring(object:GetAddress())..':'..tostring(status.asset_content)
+        if self.asset_token==token and self.last_references then
+            for index=1,4 do assert(status.choices[index]==self.last_references[index],'external_reference_change') end
+        else self.asset_token=token;self.last_references=nil end
+    end
+    local function remember(status)
+        self.last_references={};for index=1,4 do self.last_references[index]=status.choices[index] end
+    end
+    local function initialize()
+        if self.policy then return end
+        self.store=StateStore.new({json=json,read=BiomeRandomizerReadState,write=BiomeRandomizerWriteState,
+            random_seed=BiomeRandomizerRandomSeed,seed=config.seed,algorithm=Lifecycle.algorithm,
+            scope='grasslands-four-level15-e515-v1',pools=pools,
+            selection=function(seed,camp,cycle,pool) return Lifecycle.selection(seed,camp,cycle,pool,BiomeRandomizerSHA256) end})
+        self.policy=Lifecycle.new(self.store.seed,pools,self.store.cycles,BiomeRandomizerSHA256)
+        emit('selector_ready',{seed=self.store.seed,algorithm=Lifecycle.algorithm,cycles=self.policy:checkpoint()})
+    end
+    local function prepare_references(object,status)
+        expect_references(object,status)
+        for index,camp in ipairs(ids) do
+            local desired=self.policy.camps[camp].choice
+            if status.choices[index]~=desired then
+                local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,status.choices[index],desired))
+                assert(result.ok and result.choices[index]==desired,'initial_reference_unverified')
+                status=result;emit('reference_ready',{camp=camp,cycle=self.policy.camps[camp].cycle,choice=desired})
+            end
+        end
+        remember(status)
+    end
+    local function members(battle,party)
+        local count=party:GetBattleMemberCount()
+        if type(count)~='number' or count<1 or count>8 or count%1~=0 then return nil end
+        local names={};local alive=0
+        for index=0,count-1 do
+            local actor=party:GetBattleMember(index)
+            if not valid(actor) then return nil end
+            local hp,max=battle:GetCharaHP(actor),battle:GetHPMax(actor)
+            if type(hp)~='number' or type(max)~='number' or hp<0 or max<=0 then return nil end
+            names[#names+1]=actor:GetFullName();if hp>0 then alive=alive+1 end
+        end
+        table.sort(names);return table.concat(names,'|'),alive
+    end
+    local function row(battle,name)
+        -- Ordinary field enemies belong to CharaPopManager. The global-only
+        -- lookup returned a non-live reference in the native acceptance run.
+        local actor=battle:GetCharaFromActorName(FName(name),true)
+        if not valid(actor) then return nil end
+        if text(battle:GetActorName(actor))~=name then return nil end
+        local spec=text(battle:GetCharaSpecName(actor))
+        local hp,max,state=battle:GetCharaHP(actor),battle:GetHPMax(actor),battle:GetCharacterStateType(actor)
+        if type(hp)~='number' or type(max)~='number' or hp<0 or max<=0 then return nil end
+        return {id=actor:GetFullName(),name=name,spec=spec,hp=hp,max_hp=max,state=state}
+    end
+    local function death(camp,value,source)
+        if value.hp==0 and value.max_hp>0 and value.state==6 and self.policy:death(camp,self.epoch,value.id,0) then
+            emit('death_verified',{camp=camp,id=value.id,source=source})
+        elseif value.hp>0 then self.policy:alive(camp,self.epoch,value.id,value.hp) end
+    end
+    function self:step()
+        if self.fault or config.enabled~=true or type(BiomeRandomizerIsGameThread)~='function' or not BiomeRandomizerIsGameThread() then return end
+        local ok,error_value=pcall(function()
+            if not pawn() then return end
+            local object=asset();if not valid(object) then return end
+            local battle,party,field=cdo('EndBattleAPI'),cdo('EndPartyAPI'),cdo('EndFieldAPI')
+            if not valid(battle) or not valid(party) or not valid(field) then return end
+            local epoch,alive=members(battle,party);if not epoch then return end
+            initialize()
+            if epoch~=self.epoch then
+                self.epoch=epoch;self.owned={};self.policy:reset_epoch(epoch)
+                emit('epoch_observed',{actor_count=party:GetBattleMemberCount()})
+            end
+            local status=table_status(object);prepare_references(object,status)
+            if alive==0 then
+                for _,camp in ipairs(ids) do self.policy:cancel_group(camp,self.epoch) end
+                return
+            end
+            local in_battle=field:IsDuringBattle()
+            if type(in_battle)~='boolean' then return end
+            for index,camp in ipairs(ids) do
+                local current={};local first_choice
+                for choice,base in ipairs(first_names) do
+                    local value=row(battle,base..'@'..camp)
+                    if value then
+                        assert(value.spec==specs[choice],'first_character_spec_differs')
+                        current[#current+1]=value;if value.hp>0 then first_choice=choice-1 end
+                    end
+                end
+                for suffix=1,2 do
+                    local value=row(battle,string.format('mobgrasa_Ogre_Orc_%03d@%s',suffix,camp))
+                    if value then assert(value.spec==orc_spec,'orc_spec_differs');current[#current+1]=value end
+                end
+                local live_ids={}
+                for _,value in ipairs(current) do
+                    if value.hp>0 then live_ids[#live_ids+1]=value.id end
+                    self.owned[value.id]={camp=camp,name=value.name,spec=value.spec}
+                end
+                local state=self.policy.camps[camp]
+                if #live_ids==3 and first_choice~=nil then
+                    if state.phase=='cleared' then
+                        assert(self.policy:respawn(camp,self.epoch,first_choice,live_ids,true),'respawn_unverified')
+                        emit('spawn_observed',{camp=camp,cycle=state.cycle,choice=first_choice,ids=live_ids})
+                    elseif state.phase=='unknown' then
+                        if first_choice~=state.choice then
+                            -- A late initialization must never leave a living
+                            -- group with a different next-stream composition.
+                            local restored=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,state.choice,first_choice))
+                            assert(restored.ok,'late_initialization_restore_unverified')
+                            error('initial_spawn_choice_differs:'..camp)
+                        end
+                        assert(self.policy:observe_group(camp,self.epoch,live_ids,true),'initial_group_unverified')
+                        emit('group_observed',{camp=camp,cycle=state.cycle,choice=first_choice,ids=live_ids})
+                    elseif state.phase=='active' then
+                        assert(first_choice==state.choice,'active_group_choice_differs')
+                        local changed=false
+                        for _,id in ipairs(live_ids) do if not state.members[id] then changed=true end end
+                        if changed then
+                            assert(self.policy:rebind_group(camp,self.epoch,first_choice,live_ids,true),'stream_rebind_unverified')
+                            emit('group_rebound',{camp=camp,cycle=state.cycle,choice=first_choice})
+                        end
+                    end
+                    local current_ids={};for _,id in ipairs(live_ids) do current_ids[id]=true end
+                    for id,owner in pairs(self.owned) do if owner.camp==camp and not current_ids[id] then self.owned[id]=nil end end
+                end
+                for _,value in ipairs(current) do death(camp,value,'poll') end
+                if not in_battle then
+                    local proposal=self.policy:confirmed_clear(camp,self.epoch,'victory')
+                    if proposal then
+                        self.store:prepare(proposal)
+                        local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,proposal.before,proposal.after))
+                        assert(result.ok and self.policy:commit(proposal,result.choices[index]),'native_cycle_unverified')
+                        remember(result)
+                        self.store:commit(self.policy:checkpoint())
+                        emit('cycle_committed',{camp=camp,cycle=proposal.cycle,before=proposal.before,after=proposal.after})
+                    end
+                end
+            end
+        end)
+        if not ok then fail(error_value) end
+    end
+    function self:begin_play(context)
+        if self.fault or config.enabled~=true or type(BiomeRandomizerIsGameThread)~='function' or not BiomeRandomizerIsGameThread() then return end
+        local ok,error_value=pcall(function()
+            local actor=context:get();if not valid(actor) then return end
+            local class=resolve('/Script/EndGame.EndFieldEnemyTerritoryActor')
+            if not valid(class) or not actor:IsA(class) then return end
+            if not actor:GetFullName():find('/Game/Level/Game/Field/1200-GRASA/',1,true) then return end
+            local id=actor.EnemyTerritoryID
+            if type(id)~='string' then id=text(id) end
+            if not pools[id] then return end
+            local object=asset();if not valid(object) then return end
+            initialize();prepare_references(object,table_status(object))
+        end)
+        if not ok then fail(error_value) end
+    end
+    function self:end_play(context,reason)
+        if self.fault or not self.policy or not BiomeRandomizerIsGameThread() then return end
+        local ok,error_value=pcall(function()
+            local why=type(reason)=='number' and reason or reason:get()
+            if why~=0 then return end -- level unload/removal is never a death
+            local actor=context:get();if not valid(actor) then return end
+            local id=actor:GetFullName();local owner=self.owned[id]
+            if not owner then return end
+            local battle=cdo('EndBattleAPI');if not valid(battle) then return end
+            local value={id=id,hp=battle:GetCharaHP(actor),max_hp=battle:GetHPMax(actor),state=battle:GetCharacterStateType(actor)}
+            if type(value.hp)=='number' and type(value.max_hp)=='number' then death(owner.camp,value,'end_play_destroyed') end
+        end)
+        if not ok then fail(error_value) end
+    end
+    return self
+end
+return M

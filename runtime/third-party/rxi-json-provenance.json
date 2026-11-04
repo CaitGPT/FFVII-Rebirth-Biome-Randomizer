@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/rxi/json.lua",
+  "commit": "11077824d7cfcd28a4b2f152518036b295e7e4ce",
+  "license": "MIT",
+  "files": [
+    {
+      "source": "json.lua",
+      "sha256": "0eaccda57fabc0330736de25f45cf589821a42b5e0fe02e4e3125f7dc0bf2b7e"
+    },
+    {
+      "source": "LICENSE",
+      "sha256": "e91de14a15c126e70df8d30132529199211b47c5c899f82285a2ee943748f6f2"
+    }
+  ]
+}

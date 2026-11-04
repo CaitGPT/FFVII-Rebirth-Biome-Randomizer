@@ -1,18 +1,19 @@
 -- Engine-independent lifecycle policy. Native adapters must supply verified
 -- identities/deaths/clear outcomes; an actor disappearing is never a death.
-local M={algorithm='fnv1a32-xorshift-v1'}
+local M={algorithm='sha256-respawn-v1'}
 local function integer(n) return type(n)=='number' and n%1==0 end
-local function selection(seed,camp,cycle,pool)
-    local value=2166136261
-    local text=seed..'\0'..camp..'\0'..tostring(cycle)
-    for i=1,#text do value=((value~text:byte(i))*16777619)&0xffffffff end
-    value=(value~((value<<13)&0xffffffff))&0xffffffff
-    value=(value~(value>>17))&0xffffffff
-    value=(value~((value<<5)&0xffffffff))&0xffffffff
+local function selection(seed,camp,cycle,pool,sha256)
+    assert(type(sha256)=='function','SHA256 provider required')
+    -- Length framing avoids ambiguity and embedded NULs: pinned LuaMadeSimple
+    -- string getters use C strings. Seed control characters are rejected.
+    local text=string.format('%s:%d:%s:%d:%s:%d',M.algorithm,#seed,seed,#camp,camp,cycle)
+    local hash=sha256(text)
+    assert(type(hash)=='string' and #hash==64 and hash:match('^[0-9a-f]+$'),'invalid SHA256 result')
+    local value=assert(tonumber(hash:sub(1,8),16))
     return pool[(value%#pool)+1]
 end
-function M.new(seed,pools,saved)
-    assert(type(seed)=='string' and #seed>0 and #seed<=128,'invalid seed')
+function M.new(seed,pools,saved,sha256)
+    assert(type(seed)=='string' and #seed>0 and #seed<=128 and not seed:find('[%z\1-\31]'),'invalid seed')
     local self={seed=seed,pools=pools,camps={},epoch=nil,fault=nil}
     for camp,pool in pairs(pools) do
         assert(type(camp)=='string' and type(pool)=='table' and #pool>0,'invalid pool')
@@ -21,7 +22,7 @@ function M.new(seed,pools,saved)
         local previous=saved and saved[camp]
         local cycle=previous and previous.cycle or 0
         assert(integer(cycle) and cycle>=0 and cycle<=10000000,'invalid cycle')
-        self.camps[camp]={cycle=cycle,choice=selection(seed,camp,cycle,pool),members={},deaths={},phase='unknown'}
+        self.camps[camp]={cycle=cycle,choice=selection(seed,camp,cycle,pool,sha256),members={},deaths={},phase='unknown'}
     end
     function self:reset_epoch(epoch)
         assert(type(epoch)=='string' and #epoch>0,'invalid epoch')
@@ -53,7 +54,24 @@ function M.new(seed,pools,saved)
     function self:death(camp,epoch,id,hp)
         local state=self.camps[camp]
         if self.fault or not state or epoch~=self.epoch or state.phase~='active' or hp~=0 or not state.members[id] then return false end
+        if state.deaths[id] then return false end
         state.deaths[id]=true;return true
+    end
+    function self:alive(camp,epoch,id,hp)
+        local state=self.camps[camp]
+        if self.fault or not state or epoch~=self.epoch or state.phase~='active' or not integer(hp) or hp<=0 or not state.members[id] then return false end
+        state.deaths[id]=nil;return true
+    end
+    function self:cancel_group(camp,epoch)
+        local state=self.camps[camp]
+        if self.fault or not state or epoch~=self.epoch or state.phase=='pending' then return false end
+        state.members={};state.deaths={};state.phase='unknown';return true
+    end
+    function self:rebind_group(camp,epoch,choice,ids,complete)
+        local state=self.camps[camp]
+        if self.fault or not state or epoch~=self.epoch or state.phase~='active' or choice~=state.choice or not complete or #ids==0 then return false end
+        state.phase='unknown';state.members={};state.deaths={}
+        return self:observe_group(camp,epoch,ids,true)
     end
     function self:confirmed_clear(camp,epoch,outcome)
         local state=self.camps[camp]
@@ -65,7 +83,7 @@ function M.new(seed,pools,saved)
         if count==0 or state.cycle>=10000000 then return nil end
         state.phase='pending'
         state.proposal={camp=camp,epoch=epoch,cycle=state.cycle+1,
-            before=state.choice,after=selection(self.seed,camp,state.cycle+1,self.pools[camp])}
+            before=state.choice,after=selection(self.seed,camp,state.cycle+1,self.pools[camp],sha256)}
         -- Return a copy: outside code cannot change the pending transaction.
         local copy={};for k,v in pairs(state.proposal) do copy[k]=v end;return copy
     end
