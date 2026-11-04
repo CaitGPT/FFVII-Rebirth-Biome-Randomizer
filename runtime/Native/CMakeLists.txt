@@ -37,3 +37,6 @@ target_include_directories(${TARGET} PRIVATE
 target_link_libraries(${TARGET} PRIVATE "${UE4SS_IMPORT_LIB}" bcrypt)
 set_target_properties(${TARGET} PROPERTIES OUTPUT_NAME "main")
 
+add_executable(RuntimeArgumentTests "tests/argument_tests.cpp")
+target_compile_features(RuntimeArgumentTests PRIVATE cxx_std_20)
+

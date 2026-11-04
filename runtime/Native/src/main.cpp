@@ -13,6 +13,7 @@
 #include <vector>
 #include <stdexcept>
 #include "reviewed_layout.hpp"
+#include "write_arguments.hpp"
 
 namespace {
 std::string hex(const unsigned char* data, std::size_t size);
@@ -42,11 +43,27 @@ std::uint64_t encoded(std::uint32_t descriptor,int choice) {
     const auto relative=static_cast<std::int64_t>(reviewed::options[choice])-descriptor;
     return static_cast<std::uint64_t>(relative*2)|1;
 }
-DWORD game_thread{};
+DWORD window_thread() {
+    struct Search {DWORD process;DWORD thread;};
+    Search search{GetCurrentProcessId(),0};
+    EnumWindows([](HWND window,LPARAM parameter)->BOOL {
+        auto& found=*reinterpret_cast<Search*>(parameter);
+        DWORD process{};const auto thread=GetWindowThreadProcessId(window,&process);
+        wchar_t type[64]{};
+        if(process==found.process && IsWindowVisible(window) && GetClassNameW(window,type,64) &&
+           std::wstring_view(type)==L"UnrealWindow") {found.thread=thread;return FALSE;}
+        return TRUE;
+    },reinterpret_cast<LPARAM>(&search));
+    return search.thread;
+}
 bool uncertain_write{};
 Table validate(std::uintptr_t address) {
-    if(game_thread==0) game_thread=GetCurrentThreadId();
-    if(game_thread!=GetCurrentThreadId()) throw std::runtime_error("wrong_thread");
+    // ExecuteInGameThread in this UE4SS version drains on ProcessEvent, which
+    // may also occur on a loading thread. Never bind to its first invocation.
+    // Require this Windows game's own visible UnrealWindow owner thread.
+    const auto thread=window_thread();
+    if(thread==0) throw std::runtime_error("game_window_thread_unavailable");
+    if(thread!=GetCurrentThreadId()) throw std::runtime_error("wrong_thread");
     std::array<unsigned char,0x40> header{};
     if(!read(address,header.data(),header.size())) throw std::runtime_error("unreadable_asset");
     auto* object=reinterpret_cast<RC::Unreal::UObject*>(address);
@@ -93,10 +110,7 @@ int table_status(const RC::LuaMadeSimple::Lua& lua) {
 }
 int set_next(const RC::LuaMadeSimple::Lua& lua) {
     try {
-        const auto address=static_cast<std::uintptr_t>(lua.get_integer(1));
-        const auto target=lua.get_integer(2),expected=lua.get_integer(3),desired=lua.get_integer(4);
-        if(target<0 || target>=4 || expected<0 || expected>1 || desired<0 || desired>1)
-            throw std::runtime_error("invalid_selection");
+        const auto [address,target,expected,desired]=consume_write_arguments(lua);
         if(uncertain_write) throw std::runtime_error("uncertain_write_latched");
         const auto before=validate(address);
         if(before.choices[target]!=expected) throw std::runtime_error("stale_expected_selection");

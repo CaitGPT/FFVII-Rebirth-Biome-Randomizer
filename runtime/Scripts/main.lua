@@ -8,14 +8,25 @@ local function table_request()
     local line=request:read('*l');request:close()
     local label,action,target,expected,desired=line:match('^([a-z0-9%-]+) (%a+) (%d) (%d) (%d)$')
     if not label or (action~='status' and action~='set') then return end
+    local output_path=root..'runtime-table-'..label..'.json'
+    local existing=io.open(output_path,'r')
+    if existing then
+        existing:close();os.remove(root..'runtime-table.request')
+        print('[BiomeRandomizerRuntime] duplicate evidence label refused '..label..'\n')
+        return
+    end
     if type(BiomeRandomizerTableStatus)~='function' then return end
     for _,asset in ipairs(FindAllOf('EndDataObjectEnemyTerritory') or {}) do
         if asset:IsValid() and asset:GetFullName()==path then
             local address=asset:GetAddress()
             local before=BiomeRandomizerTableStatus(address)
+            -- A loading-thread ProcessEvent may drain the UE4SS executor.
+            -- No write was attempted; retain the request for a window-thread
+            -- callback instead of weakening the native thread guard.
+            if before:find('"reason":"wrong_thread"',1,true) or before:find('"reason":"game_window_thread_unavailable"',1,true) then return end
             local result=before
             if action=='set' then result=BiomeRandomizerSetNext(address,tonumber(target),tonumber(expected),tonumber(desired)) end
-            local file=assert(io.open(root..'runtime-table-'..label..'.json','w'))
+            local file=assert(io.open(output_path,'w'))
             file:write('{"action":"'..action..'","before":'..before..',"result":'..result..'}');file:close()
             os.remove(root..'runtime-table.request')
             print('[BiomeRandomizerRuntime] table experiment '..label..' result='..result..'\n')
