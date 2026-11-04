@@ -2,6 +2,5 @@
   "vanilla_root": "C:/YourOwnFModelExports",
   "game_root": "D:/Games/FINAL FANTASY VII REBIRTH",
   "packager": "C:/Tools/UnrealReZen/UnrealReZen.exe",
-  "retoc": "C:/Tools/retoc/retoc.exe",
-  "original_container": "pakchunk12-WindowsNoEditor.utoc"
+  "oodle": "C:/Tools/UnrealReZen/oo2core_9_win64.dll"
 }

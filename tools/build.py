@@ -16,8 +16,9 @@ import subprocess
 import tempfile
 
 from randomize import load_export, make_plan, sha256, verify_result
-from container_check import unpack, verify_package
-from rebirth_header import make_header, select_entry
+from container_check import unpack
+from oodle_codec import OodleCodec
+from rebirth_container import write_override
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "BiomeRandomizer_P"
@@ -100,39 +101,16 @@ def build(config: dict, seed: str, execute: bool = False, pack: bool = False, on
             headers = [identity for identity in chunks if identity[-1] == 10]
             if len(exports) != 1 or len(headers) != 1:
                 raise ValueError("Expected one asset and one header before Rebirth metadata repair")
-            retoc = Path(config["retoc"]).resolve()
-            original_container = paks / config["original_container"]
-            original_toc = original_container.read_bytes()
-            original_container_id = original_toc[56:64]
-            original_header_id = original_container_id + bytes(3) + bytes([10])
-            original_header_path = output / "original-container-header.bin"
-            run([retoc, "get", original_container, original_header_id.hex(), original_header_path])
-            fixed_header, metadata_audit = make_header(original_header_path.read_bytes(), exports[0][:8], toc[56:64], modified.stat().st_size)
-            raw_dir = output / "raw-chunks"
-            run([retoc, "unpack-raw", intermediate.with_suffix(".utoc"), raw_dir])
-            (raw_dir / "chunks" / headers[0].hex()).write_bytes(fixed_header)
+            codec = OodleCodec(Path(config.get("oodle", packager.parent / "oo2core_9_win64.dll")))
             corrected = output / "package-corrected"
             corrected.mkdir()
-            run([retoc, "pack-raw", raw_dir, corrected / f"{PACKAGE}.utoc"])
-            # Raw packing derives a fresh container ID from the output name.
-            # Preserve ReZen's unique container ID to match our opaque header
-            # chunk's ID and contents. The unsigned TOC has no header checksum.
-            corrected_toc = corrected / f"{PACKAGE}.utoc"
-            corrected_bytes = bytearray(corrected_toc.read_bytes())
-            corrected_bytes[56:64] = toc[56:64]
-            corrected_toc.write_bytes(corrected_bytes)
+            audit["container_verification"] = write_override(corrected / PACKAGE,toc,modified,codec)
             shutil.copyfile(package_dir / f"{PACKAGE}.pak", corrected / f"{PACKAGE}.pak")
             package_dir = corrected
-            checked_chunks = unpack(corrected_toc.read_bytes(), (corrected / f"{PACKAGE}.ucas").read_bytes())
-            declared_header = checked_chunks[headers[0]]
-            selected, imported, _ = select_entry(declared_header, exports[0][:8])
-            if declared_header[:8] != corrected_bytes[56:64] or declared_header != fixed_header:
-                raise ValueError("Corrected container ID/header mismatch")
             audit["package_directory"] = "package-corrected"
-            audit["rebirth_metadata"] = metadata_audit
-            audit["container_verification"] = verify_package(package_dir / PACKAGE, modified)
+            audit["rebirth_metadata"] = {"declared_packages":0,"header_bytes":65536,"uses_original_game_store":True}
             audit["packager_sha256"] = sha256(packager)
-            audit["retoc_sha256"] = sha256(retoc)
+            audit["oodle_sha256"] = sha256(codec.path)
             audit["package"] = [{"name": f"{PACKAGE}{ext}", "sha256": sha256(package_dir / f"{PACKAGE}{ext}"),
                                  "bytes": (package_dir / f"{PACKAGE}{ext}").stat().st_size} for ext in (".pak", ".ucas", ".utoc")]
             audit["mode"] = "packed_unvalidated"

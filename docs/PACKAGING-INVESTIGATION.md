@@ -26,12 +26,26 @@ The original container's decoded header has an additional 32-bit field before it
 
 The corrected archive preserves only that selected package's entry and imports. It rebuilds the legacy header with the Rebirth layout, repacks the two raw chunks with retoc, preserves the container ID consistently, and independently verifies the table bytes and metadata again. Synthetic tests also exercise import relocation and refusal of invalid original metadata.
 
-The raw packed control still requires native load and travel acceptance. A syntactically readable archive is not proof that the game accepts it.
+The raw packed control loaded the registered save but crashed during Grasslands travel. Padding the header to the original 64 KiB granularity did not resolve it; the aligned control produced the same native stack hash. A syntactically readable archive is not proof that the game accepts it.
+
+## Legacy TOC and chunk hashes
+
+The raw packer emits version-3 TOCs and newer chunk hashes. The game's original archives use version 2. A separately inspected Rebirth-specific writer also uses version 2 and SHA-1 chunk metadata. A private control preserved both decoded chunks exactly while selecting the legacy version, zeroing unused version-3 fields and recording SHA-1 metadata. It loaded slot 15 successfully but crashed during Grasslands travel with the same stack hash. These format changes alone did not resolve the failure.
+
+The original container also carries an unexplained nonzero field and data after the legacy package-store structures. A further private diagnostic preserved the entire original header except its container ID. It declared the original package set and also crashed on the same travel. This was a diagnostic, not a release design.
+
+## Native compressed-block control
+
+A valid Rebirth-shaped empty header with the unchanged asset stored raw still crashed. A further control retained that header and directory but copied the asset's exact original Oodle-compressed block and original SHA-1/compression metadata. That control loaded the same save and successfully reached Bill's Ranch. A second no-mod baseline also reached the Ranch with the current harness. The source asset block is short (24,160 raw bytes) and begins at a 64 KiB boundary, so a short block or within-block offset alone does not explain the difference.
+
+The new builder compresses edited table data through the owner's installed Oodle library, verifies exact decompression, writes the reviewed legacy layout and independently reads every resulting chunk again. An additional archive reader recovered the edited table's exact SHA-256. The new codec's output and actual enemy substitutions still require native testing; the successful original-block control does not by itself prove that the randomizer works.
 
 ## References
 
 - [UnrealReZen source](https://github.com/rm-NoobInCoding/UnrealReZen), used for initial archive identity/directory construction.
 - [CUE4Parse container-header reader](https://github.com/FabianFG/CUE4Parse/blob/master/CUE4Parse/UE4/IO/Objects/FIoContainerHeader.cs), compared with the observed original header.
 - [retoc](https://github.com/trumank/retoc), used to extract and repack raw chunks. The inspected local fork's container-header code also records a Rebirth-specific extra field.
+- [Rebirth texture container writer](https://github.com/masonpetrosky/FF7RebirthMods/blob/main/TextureUpscaler/rebirthtex/iostore_writer.py), inspected for the game's legacy TOC and hash format.
+- [Rebirth mesh container-header reader](https://github.com/nikolaybutnik/FFVII-Rebirth-Mesh-Patcher/blob/main/lib/conheader.py), inspected for package-store layout and preservation requirements.
 
 All original assets, crash dumps, generated archives, raw captures and local machine paths remain outside the published source files.

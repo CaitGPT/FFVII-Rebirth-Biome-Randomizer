@@ -6,13 +6,13 @@ This is an unreleased prototype. Keep your original saves backed up. Native plac
 
 - The supported PC game's own raw FModel exports, containing `End/Content/DataObject/Field/1200-GRASA/EnemyTerritory.uasset` and `EnemyTerritoryMob.uasset`.
 - Python 3.10 or later and the .NET 8 SDK for building. The Python tools use only the standard library; DataBuilder has no NuGet dependencies.
-- UnrealReZen for initial packing, retoc for raw-chunk extraction/repacking, and the game installation's IoStore files.
+- UnrealReZen for initial archive identity/directory construction, the owner's installed Oodle library for compression, and the game installation's IoStore files. The proprietary DLL is not included in this source repository.
 
 The builder checks both original table hashes against the reviewed catalog and stops on an unreviewed game version. Do not remove that check to force a different version to work. Re-export and inspect the data instead.
 
 ## Generate a seed
 
-Copy `tools/build-config.example.json` to `tools/build-config.local.json` and set your own export, game and tool paths. `original_container` identifies the vanilla container holding the reviewed table. Set `build_root` on the game's volume so the builder can create its vanilla-only archive view without copying the game's archives. The local file is ignored by Git. Run from the repository root:
+Copy `tools/build-config.example.json` to `tools/build-config.local.json` and set your own export, game and tool paths. `oodle` points to the installed codec DLL; if omitted, the builder looks beside UnrealReZen for `oo2core_9_win64.dll`. Set `build_root` on the game's volume so the builder can create its vanilla-only archive view without copying the game's archives. The local file is ignored by Git. Run from the repository root:
 
 ```powershell
 python tools/build.py --config tools/build-config.local.json --seed 44
