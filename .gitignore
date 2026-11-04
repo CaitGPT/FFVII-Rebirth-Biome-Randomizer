@@ -1,0 +1,12 @@
+build/
+**/bin/
+**/obj/
+**/__pycache__/
+*.local.json
+*.uasset
+*.uexp
+*.pak
+*.ucas
+*.utoc
+*.zip
+*.csv
