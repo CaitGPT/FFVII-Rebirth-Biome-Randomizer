@@ -10,3 +10,4 @@ build/
 *.utoc
 *.zip
 *.csv
+*-mod.md

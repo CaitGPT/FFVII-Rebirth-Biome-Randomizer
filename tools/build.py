@@ -8,15 +8,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import struct
 from pathlib import Path
 import subprocess
 import tempfile
 
 from randomize import load_export, make_plan, sha256, verify_result
+from container_check import unpack, verify_package
+from rebirth_header import make_header, select_entry
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "BiomeRandomizer_P"
-HEADER = bytes.fromhex("8c060097a68897a4d300")
 
 
 def run(args: list, cwd: Path | None = None) -> None:
@@ -68,20 +72,67 @@ def build(config: dict, seed: str, execute: bool = False, pack: bool = False, on
         if pack:
             packager = Path(config["packager"]).resolve()
             paks = Path(config["game_root"]).resolve() / "End" / "Content" / "Paks"
-            with (paks / "pakchunk4optional-WindowsNoEditor.ucas").open("rb") as source:
-                if source.read(10) != HEADER:
-                    raise ValueError("Unrecognized Rebirth IoStore header")
+            # ReZen recursively scans --game-dir, including installed mods. An
+            # earlier BiomeRandomizer override then becomes a second source of
+            # the same chunk ID. Give it only top-level vanilla archives through
+            # read-only use of hard links, without moving any installed files.
+            archive_view = output / "archive-input"
+            archive_view.mkdir()
+            for archive in sorted(paks.iterdir()):
+                if archive.is_file() and archive.suffix.lower() in (".pak", ".utoc", ".ucas"):
+                    try:
+                        os.link(archive, archive_view / archive.name)
+                    except OSError as error:
+                        raise ValueError("Set build_root to a writable directory on the game's volume; archive hard links require the same volume") from error
+            if not any(archive_view.glob("*.utoc")):
+                raise ValueError("No original IoStore archives found in the game's Paks directory")
             package_dir = output / "package"
             package_dir.mkdir()
             run([packager, "--content-path", staging, "--compression-format", "Zlib",
-                 "--engine-version", "GAME_UE4_26", "--game-dir", paks,
+                 "--engine-version", "GAME_UE4_26", "--game-dir", archive_view,
                  "--output-path", package_dir / f"{PACKAGE}.utoc"], cwd=packager.parent)
-            ucas = package_dir / f"{PACKAGE}.ucas"
-            with ucas.open("r+b") as stream:
-                if stream.seek(0, 2) < len(HEADER):
-                    raise ValueError("Truncated UCAS output")
-                stream.seek(0)
-                stream.write(HEADER)
+            # Never overwrite UCAS bytes with a guessed header: its first bytes
+            # are compressed chunk data, not a universal game-file preamble.
+            intermediate = package_dir / PACKAGE
+            toc = intermediate.with_suffix(".utoc").read_bytes()
+            chunks = unpack(toc, intermediate.with_suffix(".ucas").read_bytes())
+            exports = [identity for identity in chunks if identity[-1] == 2]
+            headers = [identity for identity in chunks if identity[-1] == 10]
+            if len(exports) != 1 or len(headers) != 1:
+                raise ValueError("Expected one asset and one header before Rebirth metadata repair")
+            retoc = Path(config["retoc"]).resolve()
+            original_container = paks / config["original_container"]
+            original_toc = original_container.read_bytes()
+            original_container_id = original_toc[56:64]
+            original_header_id = original_container_id + bytes(3) + bytes([10])
+            original_header_path = output / "original-container-header.bin"
+            run([retoc, "get", original_container, original_header_id.hex(), original_header_path])
+            fixed_header, metadata_audit = make_header(original_header_path.read_bytes(), exports[0][:8], toc[56:64], modified.stat().st_size)
+            raw_dir = output / "raw-chunks"
+            run([retoc, "unpack-raw", intermediate.with_suffix(".utoc"), raw_dir])
+            (raw_dir / "chunks" / headers[0].hex()).write_bytes(fixed_header)
+            corrected = output / "package-corrected"
+            corrected.mkdir()
+            run([retoc, "pack-raw", raw_dir, corrected / f"{PACKAGE}.utoc"])
+            # Raw packing derives a fresh container ID from the output name.
+            # Preserve ReZen's unique container ID to match our opaque header
+            # chunk's ID and contents. The unsigned TOC has no header checksum.
+            corrected_toc = corrected / f"{PACKAGE}.utoc"
+            corrected_bytes = bytearray(corrected_toc.read_bytes())
+            corrected_bytes[56:64] = toc[56:64]
+            corrected_toc.write_bytes(corrected_bytes)
+            shutil.copyfile(package_dir / f"{PACKAGE}.pak", corrected / f"{PACKAGE}.pak")
+            package_dir = corrected
+            checked_chunks = unpack(corrected_toc.read_bytes(), (corrected / f"{PACKAGE}.ucas").read_bytes())
+            declared_header = checked_chunks[headers[0]]
+            selected, imported, _ = select_entry(declared_header, exports[0][:8])
+            if declared_header[:8] != corrected_bytes[56:64] or declared_header != fixed_header:
+                raise ValueError("Corrected container ID/header mismatch")
+            audit["package_directory"] = "package-corrected"
+            audit["rebirth_metadata"] = metadata_audit
+            audit["container_verification"] = verify_package(package_dir / PACKAGE, modified)
+            audit["packager_sha256"] = sha256(packager)
+            audit["retoc_sha256"] = sha256(retoc)
             audit["package"] = [{"name": f"{PACKAGE}{ext}", "sha256": sha256(package_dir / f"{PACKAGE}{ext}"),
                                  "bytes": (package_dir / f"{PACKAGE}{ext}").stat().st_size} for ext in (".pak", ".ucas", ".utoc")]
             audit["mode"] = "packed_unvalidated"

@@ -6,13 +6,13 @@ This is an unreleased prototype. Keep your original saves backed up. Native plac
 
 - The supported PC game's own raw FModel exports, containing `End/Content/DataObject/Field/1200-GRASA/EnemyTerritory.uasset` and `EnemyTerritoryMob.uasset`.
 - Python 3.10 or later and the .NET 8 SDK for building. The Python tools use only the standard library; DataBuilder has no NuGet dependencies.
-- UnrealReZen for packing, and the game installation's IoStore files.
+- UnrealReZen for initial packing, retoc for raw-chunk extraction/repacking, and the game installation's IoStore files.
 
 The builder checks both original table hashes against the reviewed catalog and stops on an unreviewed game version. Do not remove that check to force a different version to work. Re-export and inspect the data instead.
 
 ## Generate a seed
 
-Copy `tools/build-config.example.json` to `tools/build-config.local.json` and set your own export, game and packager paths. The local file is ignored by Git. Run from the repository root:
+Copy `tools/build-config.example.json` to `tools/build-config.local.json` and set your own export, game and tool paths. `original_container` identifies the vanilla container holding the reviewed table. Set `build_root` on the game's volume so the builder can create its vanilla-only archive view without copying the game's archives. The local file is ignored by Git. Run from the repository root:
 
 ```powershell
 python tools/build.py --config tools/build-config.local.json --seed 44
@@ -24,13 +24,13 @@ This builds the source reader, exports read-only input data, and creates a plan 
 python tools/build.py --config tools/build-config.local.json --seed 44 --execute --pack
 ```
 
-This writes and independently verifies the modified table, then packs the package triplet. `--execute` without `--pack` writes only the verified table. To produce the smallest diagnostic build, add `--only Grassland_mob_05`. The option refuses targets outside the explicit allowlist.
+This writes and independently verifies the modified table, then packs and verifies the package triplet. The final files are in the directory named by `package_directory` in `audit.json` (currently `package-corrected/`). Intermediate packager output is retained for diagnosis and is not the installable result. `--execute` without `--pack` writes only the verified table. To produce the smallest diagnostic build, add `--only Grassland_mob_05`. The option refuses targets outside the explicit allowlist.
 
 A seed is a string: `44` and `044` are different seeds. The same seed, catalog and algorithm produce the same selected encounters. Different seeds can sometimes select the same composition at a particular encounter; there are two choices per encounter.
 
 ## Install and remove a tested package
 
-Close the game first. Back up any existing complete `BiomeRandomizer_P.pak`, `.ucas` and `.utoc` triplet and compare SHA-256 hashes. Copy the new complete triplet from the selected build's `package/` directory into `End/Content/Paks/~mods/`. Verify the installed hashes against `audit.json` before launching. Do not mix files from different builds.
+Close the game first. Back up any existing complete `BiomeRandomizer_P.pak`, `.ucas` and `.utoc` triplet and compare SHA-256 hashes. Copy the new complete triplet from the selected build's audited `package_directory` into `End/Content/Paks/~mods/`. Verify the installed hashes against `audit.json` before launching. Do not mix files from different builds or install intermediate output.
 
 To remove the prototype, close the game, retain a backup, and remove only its three named files. Restore an earlier package only from its own verified complete triplet. Other mods are independent and should remain installed.
 

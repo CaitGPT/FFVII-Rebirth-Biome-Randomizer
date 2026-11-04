@@ -18,7 +18,7 @@ The builder changes only `MobTemplateList_Array` in selected rows whose choice d
 
 The builder first verifies original binary SHA-256 hashes, exports the tables using DataBuilder's long CSV format, and checks each reviewed target and donor's structural constraints and mob-to-spec references. DataBuilder edits and rereads its own result. A separate Python comparison rereads the output CSV and requires the exact expected change in every row and property. Original input hashes are checked again before success.
 
-The audit records the algorithm, seed, catalog and input hashes, per-target selections, modified asset hash and complete package hashes. The UCAS header is taken from the known Rebirth format after checking the installed vanilla container header. Generated packages are labelled `packed_unvalidated` until a separate native test supplies evidence.
+The audit records the algorithm, seed, catalog and input hashes, per-target selections, modified asset hash and complete package hashes. Every IoStore block is decompressed and the packed asset is compared with the independently verified table. The selected package-store entry comes from the actual vanilla container and is written in Rebirth's legacy layout. Generated packages are labelled `packed_unvalidated` until a separate native test supplies evidence. The [packaging investigation](PACKAGING-INVESTIGATION.md) records why copying arbitrary UCAS prefix bytes was removed.
 
 All choices remain stable through save/load and respawn because the mapping is baked into the package. This is not per-spawn or per-visit randomisation. No runtime code writes data tables or save files.
 
