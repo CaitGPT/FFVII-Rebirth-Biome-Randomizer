@@ -4,11 +4,11 @@ This is an unreleased prototype. Keep your original saves backed up. Native plac
 
 ## Requirements
 
-- The supported PC game's own raw FModel exports, containing `End/Content/DataObject/Field/1200-GRASA/EnemyTerritory.uasset` and `EnemyTerritoryMob.uasset`.
+- The supported PC game's own raw FModel exports: regional `EnemyTerritory` and `EnemyTerritoryMob`, plus resident `BattleCharaSpec` and `CharaSpec`, at the four paths recorded in `data/pools.json` under `End/Content/`.
 - Python 3.10 or later and the .NET 8 SDK for building. The Python tools use only the standard library; DataBuilder has no NuGet dependencies.
 - UnrealReZen for initial archive identity/directory construction, the owner's installed Oodle library for compression, and the game installation's IoStore files. The proprietary DLL is not included in this source repository.
 
-The builder checks both original table hashes against the reviewed catalog and stops on an unreviewed game version. Do not remove that check to force a different version to work. Re-export and inspect the data instead.
+The builder checks all four original table hashes against the reviewed catalog and stops on an unreviewed game version. Do not remove that check to force a different version to work. Re-export and inspect the data instead.
 
 ## Generate a seed
 
@@ -27,6 +27,8 @@ python tools/build.py --config tools/build-config.local.json --seed 44 --execute
 This writes and independently verifies the modified table, then packs and verifies the package triplet. The final files are in the directory named by `package_directory` in `audit.json` (currently `package-corrected/`). Intermediate packager output is retained for diagnosis and is not the installable result. `--execute` without `--pack` writes only the verified table. To produce the smallest diagnostic build, add `--only Grassland_mob_05`. The option refuses targets outside the explicit allowlist.
 
 A seed is a string: `44` and `044` are different seeds. The same seed, catalog and algorithm produce the same selected encounters. Different seeds can sometimes select the same composition at a particular encounter; there are two choices per encounter.
+
+For algorithmv2 and the reviewed catalog, seed3 selects Mu1+Orc2 at all four targets; seed6 selects the original Kalm Fang1+Orc2 at all four. Seed44 selects Mu at05/23 and Kalm Fang at29/30. These are build-plan expectations, not native acceptance receipts. Mandragora is currently excluded; see [the cross-category investigation](COMPATIBILITY.md).
 
 ## Install and remove a tested package
 
