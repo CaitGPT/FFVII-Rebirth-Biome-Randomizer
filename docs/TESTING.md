@@ -33,3 +33,15 @@ The original Mandragora attempts, raw/Zlib packaging failures and the unrelated 
 The manual-command fight exposed an evidence-hook limitation: registering and beginning a production context worked, but ending it refused because manual fights supply no completed routeResult. The context is unknown, not verified. Keep the direct native evidence and full recording; never manufacture a route result to make the event succeed.
 
 The owner subsequently specified runtime rerolling on each cleared-camp respawn for1.0.0 and a [final regression/conflict review](RELEASE-QA.md). Build-time baseline results cannot pass that runtime release gate.
+
+## Automatic runtime acceptance in progress
+
+Twenty synthetic Lua 5.4 cases pass for the lifecycle policy, seed/cycle persistence, prepared-clear crash recovery, streaming rebind, defeat and conflicting writes. The native decoder also has a compiled argument regression. These are offline results.
+
+Automatic native2 used DLL SHA256 `669e9084d0268ddd89cc9517e4813722c6f3577850ea802d76d192771b41661d`, adapter SHA256 `566e8a45e3df58ffa043f5e85b4e30d7f867b21b8fc25bd0041fc5ab062cd2b5`, seed `613`, original game data, and the actual installed mod set. Our earlier data package triplet was removed to a verified backup. Owner checkpoint22 remained hash-identical throughout.
+
+The adapter acquired the original exact three-member groups at05,23 and29. One Orc died during an initial Hard-mode loss; all counters remained zero after verified Game Over. Retry reacquired fresh actors. A temporary, verified frontline swap replaced Cloud with Barret without saving. The subsequent original camp05 group cleared: each exact member produced zero-HP/native-Dead evidence, followed by one automatic cycle commit at22:10:05 UTC. The journal had05=1 and all other counters0.
+
+Fast travel to Oliver's Farm, the unchanged180-second native timer, and a return route produced exact fresh Mu1+Orc2 at05 at22:13:42. The adapter independently logged `spawn_observed` cycle1/choice1. Groups23 and29 retained their original Kalm Fang/Orc actors. No manual setter request was used. This passes one automatic native clear-to-respawn transition, including partial-clear/defeat rejection. The full recording `2026-11-04 21-48-59.mkv`, failed attempt, raw logs, state journals, response JSON and captures remain outside Git.
+
+Still required: nonzero-state restart/first-spawn timing; reverse/repeated transitions; living-group streaming without reroll; remaining arenas and broader pools; protected encounters, region transitions, mod conflicts, removal and the final [release QA gate](RELEASE-QA.md). No release acceptance or publication follows from this scoped pass.
