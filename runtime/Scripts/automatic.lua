@@ -66,7 +66,13 @@ function M.new(config)
         local token=tostring(object:GetAddress())..':'..tostring(status.asset_content)
         if self.asset_token==token and self.last_references then
             for index=1,4 do assert(status.choices[index]==self.last_references[index],'external_reference_change') end
-        else self.asset_token=token;self.last_references=nil end
+        else
+            -- A fresh native asset starts with the original references. A
+            -- nonzero reference before our first write belongs to somebody
+            -- else; never adopt it as permission to overwrite that mod.
+            for index=1,4 do assert(status.choices[index]==0,'preexisting_reference_change') end
+            self.asset_token=token;self.last_references=nil
+        end
     end
     local function remember(status)
         self.last_references={};for index=1,4 do self.last_references[index]=status.choices[index] end
@@ -82,6 +88,46 @@ function M.new(config)
     end
     local function prepare_references(object,status)
         expect_references(object,status)
+        -- Preflight every changed camp before writing any of them. Late
+        -- initialization must not change a living group's next-stream choice,
+        -- nor leave other camps changed after a later camp refuses startup.
+        local battle=cdo('EndBattleAPI');assert(valid(battle),'initial_battle_api_unavailable')
+        for index,camp in ipairs(ids) do
+            local desired=self.policy.camps[camp].choice
+            if status.choices[index]~=desired then
+                local live=false;local live_first;local dead_first;local ambiguous_dead=false
+                local function inspect(name,spec,choice)
+                    local actor=battle:GetCharaFromActorName(FName(name),true)
+                    if not valid(actor) then return true end
+                    assert(text(battle:GetActorName(actor))==name and text(battle:GetCharaSpecName(actor))==spec,'initial_character_identity_differs')
+                    local hp,max=battle:GetCharaHP(actor),battle:GetHPMax(actor)
+                    assert(type(hp)=='number' and type(max)=='number' and hp>=0 and max>=0,'initial_character_hp_unreadable')
+                    if max==0 then return false end -- population is not ready; defer all writes
+                    if hp>0 then
+                        live=true
+                        if choice~=nil then
+                            assert(live_first==nil or live_first==choice,'initial_multiple_first_members')
+                            live_first=choice
+                        end
+                    else
+                        if battle:GetCharacterStateType(actor)~=6 then return false end
+                        if choice~=nil then
+                            if dead_first~=nil and dead_first~=choice then ambiguous_dead=true end
+                            dead_first=choice
+                        end
+                    end
+                    return true
+                end
+                for choice,base in ipairs(first_names) do
+                    if not inspect(base..'@'..camp,specs[choice],choice-1) then return false end
+                end
+                for suffix=1,2 do
+                    if not inspect(string.format('mobgrasa_Ogre_Orc_%03d@%s',suffix,camp),orc_spec) then return false end
+                end
+                local observed=live_first or (not ambiguous_dead and dead_first or nil)
+                if live then assert(observed==desired,'initial_living_group_choice_differs:'..camp) end
+            end
+        end
         for index,camp in ipairs(ids) do
             local desired=self.policy.camps[camp].choice
             if status.choices[index]~=desired then
@@ -91,6 +137,7 @@ function M.new(config)
             end
         end
         remember(status)
+        return true
     end
     local function members(battle,party)
         local count=party:GetBattleMemberCount()
@@ -134,7 +181,7 @@ function M.new(config)
                 self.epoch=epoch;self.owned={};self.policy:reset_epoch(epoch)
                 emit('epoch_observed',{actor_count=party:GetBattleMemberCount()})
             end
-            local status=table_status(object);prepare_references(object,status)
+            local status=table_status(object);if not prepare_references(object,status) then return end
             if alive==0 then
                 for _,camp in ipairs(ids) do self.policy:cancel_group(camp,self.epoch) end
                 return

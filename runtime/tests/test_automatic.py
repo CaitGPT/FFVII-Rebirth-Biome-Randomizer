@@ -118,4 +118,43 @@ class Adapter(unittest.TestCase):
             assert(json.decode(disk).cycles.Grassland_mob_05.cycle==0)
         ''')
 
+    def test_preexisting_reference_writer_is_not_overwritten(self):
+        self.run_case('''
+            choices[1]=1;native_writes={}
+            local fresh=Automatic.new({enabled=true,seed='613'});fresh:step()
+            assert(fresh.fault and fresh.fault:find('preexisting_reference_change',1,true))
+            assert(#native_writes==0 and choices[1]==1)
+        ''')
+
+    def test_late_initialization_preflights_all_camps_before_writing(self):
+        self.run_case('''
+            local seed
+            for i=1,100 do
+                local pick=require('lifecycle').selection
+                if pick(tostring(i),'Grassland_mob_05',0,{0,1},BiomeRandomizerSHA256)==1 and
+                   pick(tostring(i),'Grassland_mob_23',0,{0,1},BiomeRandomizerSHA256)==1 then seed=tostring(i);break end
+            end
+            map={}
+            for _,a in ipairs(rows) do a.name=a.name:gsub('Grassland_mob_05','Grassland_mob_23');map[a.name]=a end
+            assert(seed);disk='';native_writes={}
+            local fresh=Automatic.new({enabled=true,seed=seed});fresh:step()
+            assert(fresh.fault and fresh.fault:find('initial_living_group_choice_differs',1,true))
+            assert(#native_writes==0)
+            for _,choice in ipairs(choices) do assert(choice==0) end
+        ''')
+
+    def test_population_not_ready_defers_every_initial_write(self):
+        self.run_case('''
+            local seed
+            for i=1,100 do
+                if require('lifecycle').selection(tostring(i),'Grassland_mob_05',0,{0,1},BiomeRandomizerSHA256)==1 then seed=tostring(i);break end
+            end
+            assert(seed);disk='';native_writes={};rows[1].max=0
+            local fresh=Automatic.new({enabled=true,seed=seed});fresh:step()
+            assert(not fresh.fault and #native_writes==0)
+            for _,choice in ipairs(choices) do assert(choice==0) end
+            rows[1].max=100;fresh:step()
+            assert(fresh.fault and #native_writes==0)
+        ''')
+
 if __name__=='__main__':unittest.main()
