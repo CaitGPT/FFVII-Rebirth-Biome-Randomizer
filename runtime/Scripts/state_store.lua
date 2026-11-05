@@ -21,20 +21,36 @@ function M.new(options)
         end
         -- A later version may add camps, and one that drops a camp keeps its counter.
         for camp in pairs(options.pools) do document.cycles[camp]=document.cycles[camp] or {cycle=0} end
+        document.unlocked=document.unlocked or {}
+        assert(type(document.unlocked)=='table','state_unlocked_invalid')
+        for _,name in ipairs(document.unlocked) do assert(type(name)=='string' and #name<=128,'state_unlocked_invalid') end
     end
     local fresh=not document or (options.seed~='auto' and options.seed~=document.seed)
     if fresh then
         local seed=options.seed=='auto' and options.random_seed() or options.seed
         assert(type(seed)=='string' and #seed>0 and #seed<=128 and not seed:find('[%z\1-\31]'),'seed_unavailable')
-        document={version=1,algorithm=options.algorithm,scope=options.scope,seed=seed,cycles={}}
+        document={version=1,algorithm=options.algorithm,scope=options.scope,seed=seed,cycles={},unlocked={}}
         for camp in pairs(options.pools) do document.cycles[camp]={cycle=0} end
     end
     local function persist()
         local encoded=json.encode(document)
-        assert(#encoded<=16384 and options.write(encoded)==true,'state_write_unverified')
+        assert(#encoded<=65536 and options.write(encoded)==true,'state_write_unverified')
     end
     if fresh then persist() end
-    local self={seed=document.seed,cycles=copy(document.cycles)}
+    local self={seed=document.seed,cycles=copy(document.cycles),unlocked=copy(document.unlocked),unlocked_set={}}
+    for _,name in ipairs(document.unlocked) do self.unlocked_set[name]=true end
+    local function persist_async()
+        local encoded=json.encode(document)
+        assert(#encoded<=65536 and options.write_async(encoded)==true,'state_write_not_queued')
+    end
+    -- An enemy a won Combat Assignment has added to its region's camps. Kept with the seed, not a save.
+    function self:unlock(name)
+        if self.unlocked_set[name] then return false end
+        document.unlocked[#document.unlocked+1]=name
+        self.unlocked[#self.unlocked+1]=name;self.unlocked_set[name]=true
+        persist_async()
+        return true
+    end
     -- Saves one camp's new counter on a background thread. A crash before it lands
     -- only means that camp rolls its previous choice again next time.
     function self:save(camp,cycles)
@@ -43,8 +59,7 @@ function M.new(options)
             assert(cycles[name] and cycles[name].cycle==expected,'save_cycle_differs')
         end
         document.cycles=copy(cycles);self.cycles=copy(cycles)
-        local encoded=json.encode(document)
-        assert(#encoded<=16384 and options.write_async(encoded)==true,'state_write_not_queued')
+        persist_async()
     end
     return self
 end

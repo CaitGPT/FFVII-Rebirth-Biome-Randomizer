@@ -24,6 +24,8 @@
 #include "spawn_points.hpp"
 #include <Unreal/UObjectGlobals.hpp>
 #include <unordered_map>
+#include <memory>
+#include <utility>
 #include <unordered_set>
 
 namespace {
@@ -48,11 +50,53 @@ std::string digest(const std::vector<unsigned char>& bytes) {
 struct Table {
     std::uintptr_t content{};
     std::vector<unsigned char> bytes;
-    std::vector<int> choices;
+    std::vector<std::string> choices; // per target: "o" for the game's own, or "t:enemies/c:counts"
 };
-std::uint64_t encoded(std::uint32_t descriptor,std::uint32_t option) {
-    const auto relative=static_cast<std::int64_t>(option)-descriptor;
+// Lists the runtime owns: a camp's enemies (FNames, 8 bytes each) and exact counts (one byte each). Made on first
+// use and never freed, so a row can point at one for as long as the game runs. Keyed by contents.
+std::unordered_map<std::string,std::unique_ptr<unsigned char[]>> owned_lists;
+std::unordered_map<std::uintptr_t,std::string> owned_keys;
+std::uint64_t relative_to(std::uintptr_t from,std::uintptr_t to) {
+    const auto relative=static_cast<std::int64_t>(to)-static_cast<std::int64_t>(from);
     return static_cast<std::uint64_t>(relative*2)|1;
+}
+std::uintptr_t target_of(std::uintptr_t from,std::uint64_t value) {
+    if(!(value&1)) return 0;
+    return from+static_cast<std::uintptr_t>(static_cast<std::int64_t>(value)>>1);
+}
+std::vector<int> numbers(const std::string& text) {
+    std::vector<int> out;std::size_t at=0;
+    while(at<text.size()) {
+        const auto dot=text.find('.',at);const auto part=text.substr(at,dot==std::string::npos?std::string::npos:dot-at);
+        if(part.empty() || part.size()>3 || part.find_first_not_of("0123456789")!=std::string::npos) throw std::runtime_error("invalid_composition");
+        out.push_back(std::stoi(part));
+        if(dot==std::string::npos) break;
+        at=dot+1;
+    }
+    return out;
+}
+std::string joined(const std::vector<int>& values) {
+    std::string out;for(std::size_t i=0;i<values.size();++i) {if(i) out+='.';out+=std::to_string(values[i]);}
+    return out;
+}
+struct Composition {std::vector<int> enemies,counts;};
+Composition parse(const std::string& key,std::uint32_t slots) {
+    if(key.rfind("t:",0)!=0) throw std::runtime_error("invalid_composition");
+    const auto split=key.find("/c:");
+    if(split==std::string::npos) throw std::runtime_error("invalid_composition");
+    Composition out{numbers(key.substr(2,split-2)),numbers(key.substr(split+3))};
+    if(out.enemies.size()!=slots || out.counts.size()!=slots) throw std::runtime_error("invalid_composition");
+    return out;
+}
+const unsigned char* owned(const std::string& key,const std::vector<unsigned char>& bytes) {
+    auto found=owned_lists.find(key);
+    if(found!=owned_lists.end()) return found->second.get();
+    auto block=std::make_unique<unsigned char[]>(bytes.size());
+    std::memcpy(block.get(),bytes.data(),bytes.size());
+    const auto* raw=block.get();
+    owned_keys[reinterpret_cast<std::uintptr_t>(raw)]=key;
+    owned_lists[key]=std::move(block);
+    return raw;
 }
 DWORD window_thread() {
     struct Search {DWORD process;DWORD thread;};
@@ -90,14 +134,29 @@ Table validate(std::uintptr_t address,std::size_t table_index) {
     table.choices.resize(reviewed_table.target_count);
     if(!read(table.content,table.bytes.data(),table.bytes.size())) throw std::runtime_error("unreadable_image");
     auto normalized=table.bytes;
+    const std::string table_tag="T"+std::to_string(table_index)+":";
     for(std::size_t i=0;i<reviewed_table.target_count;++i) {
         const auto& target=reviewed_table.targets[i];
-        std::uint64_t value{};std::memcpy(&value,table.bytes.data()+target.descriptor,8);
-        int choice=-1;
-        for(std::uint32_t k=0;k<target.option_count;++k) if(value==encoded(target.descriptor,target.options[k])) {choice=static_cast<int>(k);break;}
-        if(choice<0) throw std::runtime_error("unreviewed_composition_pointer");
-        table.choices[i]=choice;
-        value=encoded(target.descriptor,target.options[0]);std::memcpy(normalized.data()+target.descriptor,&value,8);
+        std::uint64_t enemies{},low{},high{};
+        std::memcpy(&enemies,table.bytes.data()+target.descriptor,8);
+        std::memcpy(&low,table.bytes.data()+target.min_descriptor,8);
+        std::memcpy(&high,table.bytes.data()+target.max_descriptor,8);
+        const auto original_enemies=relative_to(table.content+target.descriptor,table.content+target.template_original);
+        const auto original_low=relative_to(table.content+target.min_descriptor,table.content+target.min_original);
+        const auto original_high=relative_to(table.content+target.max_descriptor,table.content+target.max_original);
+        if(enemies==original_enemies && low==original_low && high==original_high) table.choices[i]="o";
+        else {
+            // Only lists this runtime made may stand in a row; anything else is another writer.
+            const auto e=owned_keys.find(target_of(table.content+target.descriptor,enemies));
+            const auto lo=target_of(table.content+target.min_descriptor,low),hi=target_of(table.content+target.max_descriptor,high);
+            const auto c=owned_keys.find(lo);
+            if(e==owned_keys.end() || c==owned_keys.end() || lo!=hi || e->second.rfind(table_tag,0)!=0 || c->second.rfind("C:",0)!=0)
+                throw std::runtime_error("unreviewed_composition_pointer");
+            table.choices[i]="t:"+e->second.substr(table_tag.size())+"/c:"+c->second.substr(2);
+        }
+        std::memcpy(normalized.data()+target.descriptor,&original_enemies,8);
+        std::memcpy(normalized.data()+target.min_descriptor,&original_low,8);
+        std::memcpy(normalized.data()+target.max_descriptor,&original_high,8);
     }
     for(std::size_t n=0;n<reviewed_table.name_count;++n) {
         const auto& patch=reviewed_table.names[n];
@@ -115,7 +174,7 @@ Table validate(std::uintptr_t address,std::size_t table_index) {
 }
 std::string status_json(const Table& table) {
     std::ostringstream out;out << "{\"ok\":true,\"image_bytes\":" << table.bytes.size() << ",\"asset_content\":" << table.content << ",\"choices\":[";
-    for(std::size_t i=0;i<table.choices.size();++i) {if(i)out<<',';out<<table.choices[i];}
+    for(std::size_t i=0;i<table.choices.size();++i) {if(i)out<<',';out<<'"'<<table.choices[i]<<'"';}
     out << "],\"all_names_and_structural_fingerprint_verified\":true,\"uncertain_write\":" << (uncertain_write?"true":"false") << '}';
     return out.str();
 }
@@ -150,7 +209,7 @@ std::filesystem::path state_directory() {
 }
 std::string read_file(const std::filesystem::path& path) {
     const auto size=std::filesystem::file_size(path);
-    if(size==0 || size>16384) throw std::runtime_error("state_file_size_invalid");
+    if(size==0 || size>65536) throw std::runtime_error("state_file_size_invalid");
     std::ifstream file(path,std::ios::binary);
     if(!file) throw std::runtime_error("state_read_failed");
     std::string value(static_cast<std::size_t>(size),'\0');
@@ -196,7 +255,7 @@ void write_state_file(const std::string& value) {
 std::string state_argument(const RC::LuaMadeSimple::Lua& lua) {
     if(!lua.is_string(1)) throw std::runtime_error("state_payload_type");
     std::string value(lua.get_string(1));
-    if(value.empty() || value.size()>16384) throw std::runtime_error("state_payload_size");
+    if(value.empty() || value.size()>65536) throw std::runtime_error("state_payload_size");
     return value;
 }
 int write_state(const RC::LuaMadeSimple::Lua& lua) {
@@ -231,31 +290,56 @@ int set_next(const RC::LuaMadeSimple::Lua& lua) {
     try {
         const auto arguments=consume_write_arguments(lua);
         const auto address=arguments.address;const auto table_index=static_cast<std::size_t>(arguments.table);
-        const auto target=static_cast<std::size_t>(arguments.target);const auto expected=arguments.expected;const auto desired=arguments.desired;
+        const auto target=static_cast<std::size_t>(arguments.target);
         if(uncertain_write) throw std::runtime_error("uncertain_write_latched");
         const auto before=validate(address,table_index);
         const auto& reviewed_table=reviewed::tables[table_index];
         if(target>=reviewed_table.target_count) throw std::runtime_error("invalid_selection");
         const auto& reviewed_target=reviewed_table.targets[target];
-        if(expected>=reviewed_target.option_count || desired>=reviewed_target.option_count) throw std::runtime_error("invalid_selection");
-        if(before.choices[target]!=expected) throw std::runtime_error("stale_expected_selection");
-        if(expected==desired) {lua.set_string(status_json(before));return 1;}
-        const auto offset=reviewed_target.descriptor;
-        const auto pointer=before.content+offset;
-        MEMORY_BASIC_INFORMATION region{};
-        if(!VirtualQuery(reinterpret_cast<void*>(pointer),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
-           !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
-           pointer+8>reinterpret_cast<std::uintptr_t>(region.BaseAddress)+region.RegionSize)
-            throw std::runtime_error("destination_not_writable_data");
-        auto wanted=before.bytes;const auto value=encoded(offset,reviewed_target.options[desired]);
-        std::memcpy(wanted.data()+offset,&value,8);
-        // This changes this row's relative pointer, never the shared vector.
-        // Keep the latch set unless exact full-image readback succeeds.
-        uncertain_write=true;SIZE_T written{};
-        if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(pointer),&value,8,&written) || written!=8)
-            throw std::runtime_error("write_uncertain");
+        if(before.choices[target]!=arguments.expected) throw std::runtime_error("stale_expected_selection");
+        if(arguments.expected==arguments.desired) {lua.set_string(status_json(before));return 1;}
+        const auto content=before.content;
+        std::uintptr_t enemies_at=content+reviewed_target.template_original;
+        std::uintptr_t low_at=content+reviewed_target.min_original,high_at=content+reviewed_target.max_original;
+        if(arguments.desired!="o") {
+            const auto wanted=parse(arguments.desired,reviewed_target.slots);
+            std::vector<unsigned char> names(8*reviewed_target.slots),counts(reviewed_target.slots);
+            for(std::uint32_t s=0;s<reviewed_target.slots;++s) {
+                const auto enemy=wanted.enemies[s];const auto count=wanted.counts[s];
+                if(enemy<0 || static_cast<std::size_t>(enemy)>=reviewed_table.catalog_count || enemy>=64 ||
+                   !(reviewed_target.allowed[s]&(1ull<<enemy))) throw std::runtime_error("enemy_not_allowed_here");
+                if(count<1 || count>12) throw std::runtime_error("count_out_of_range");
+                // The table's own copy of this enemy's name, exactly as the game resolved it.
+                std::memcpy(names.data()+8*s,before.bytes.data()+reviewed_table.catalog[enemy],8);
+                counts[s]=static_cast<unsigned char>(count);
+            }
+            enemies_at=reinterpret_cast<std::uintptr_t>(owned("T"+std::to_string(table_index)+":"+joined(wanted.enemies),names));
+            low_at=high_at=reinterpret_cast<std::uintptr_t>(owned("C:"+joined(wanted.counts),counts));
+        }
+        const std::array<std::pair<std::uint32_t,std::uint64_t>,3> writes{{
+            {reviewed_target.descriptor,relative_to(content+reviewed_target.descriptor,enemies_at)},
+            {reviewed_target.min_descriptor,relative_to(content+reviewed_target.min_descriptor,low_at)},
+            {reviewed_target.max_descriptor,relative_to(content+reviewed_target.max_descriptor,high_at)}}};
+        auto wanted_bytes=before.bytes;
+        for(const auto& [offset,value]:writes) {
+            const auto pointer=content+offset;
+            MEMORY_BASIC_INFORMATION region{};
+            if(!VirtualQuery(reinterpret_cast<void*>(pointer),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
+               !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+               pointer+8>reinterpret_cast<std::uintptr_t>(region.BaseAddress)+region.RegionSize)
+                throw std::runtime_error("destination_not_writable_data");
+            std::memcpy(wanted_bytes.data()+offset,&value,8);
+        }
+        // These change this row's own pointers, never a shared list. Keep the latch set
+        // unless exact full-image readback succeeds.
+        uncertain_write=true;
+        for(const auto& [offset,value]:writes) {
+            SIZE_T written{};
+            if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(content+offset),&value,8,&written) || written!=8)
+                throw std::runtime_error("write_uncertain");
+        }
         const auto after=validate(address,table_index);
-        if(after.content!=before.content || after.bytes!=wanted || after.choices[target]!=desired)
+        if(after.content!=before.content || after.bytes!=wanted_bytes || after.choices[target]!=arguments.desired)
             throw std::runtime_error("write_readback_differs");
         uncertain_write=false;lua.set_string(status_json(after));
     } catch(const std::exception& error) {
@@ -268,16 +352,47 @@ std::string hex(const unsigned char* data, std::size_t size) {
     for (std::size_t i=0;i<size;++i) out << std::hex << std::setw(2) << std::setfill('0') << unsigned(data[i]);
     return out.str();
 }
-// Spawn lists. The territory spawn actors don't report BeginPlay, so they're polled: finding them
-// by class is cheap in native code. New actors are filled at once; actors that have gone mean their
-// level is unloading, and Lua puts its table back before the next level's actors appear.
+// Spawn lists. Each region keeps its territory spawn actors in their own streamed level, and these
+// actors don't report BeginPlay. Finding objects by class or path costs 35-90 ms here, so instead the
+// world's short level list is compared each poll. When a spawn level arrives, its own actor list is
+// walked once and every allowlisted actor filled. When it leaves, its camps are reported gone so Lua
+// can put their tables back before the next level arrives.
+struct RawPointers {RC::Unreal::UObject** data;std::int32_t num;std::int32_t max;};
 std::unordered_set<std::wstring> spawn_camps;
-std::unordered_map<RC::Unreal::UObject*,std::wstring> spawn_actor_camp; // every allowlisted actor seen alive
 std::unordered_map<std::wstring,RC::Unreal::UObject*> spawn_ready;
-unsigned long long spawn_seen{},spawn_filled{},spawn_refused{},spawn_polls{};
+std::unordered_map<RC::Unreal::UObject*,std::vector<std::wstring>> spawn_levels; // spawn level -> its camps
+std::vector<RC::Unreal::UObject*> known_levels;
+unsigned long long spawn_seen{},spawn_filled{},spawn_refused{},spawn_polls{},spawn_level_changes{};
 std::wstring camp_of(const std::wstring& full) {
     const auto at=full.rfind(L'.');
     return at==std::wstring::npos?std::wstring{}:full.substr(at+1);
+}
+bool sane(const RawPointers* a,int limit) {return a && a->num>=0 && a->num<=limit && a->max>=a->num && (a->num==0 || a->data);}
+RawPointers* level_actors(RC::Unreal::UObject* level) {
+    // ULevel keeps Actors, then ActorsForGC, directly before its reflected OwningWorld.
+    auto* owning=static_cast<unsigned char*>(level->GetValuePtrByPropertyName(STR("OwningWorld")));
+    if(!owning) return nullptr;
+    auto* actors=reinterpret_cast<RawPointers*>(owning-0x20);
+    return sane(actors,200000)?actors:nullptr;
+}
+std::vector<std::wstring> prepare_spawn_level(RC::Unreal::UObject* level,long long& fresh) {
+    std::vector<std::wstring> camps;
+    auto* actors=level_actors(level);
+    if(!actors) {++spawn_refused;return camps;}
+    for(std::int32_t i=0;i<actors->num;++i) {
+        auto* actor=actors->data[i];
+        if(!actor) continue;
+        const auto full=actor->GetFullName();
+        if(!full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) continue;
+        ++spawn_seen;
+        const auto camp=camp_of(full);
+        if(!spawn_camps.contains(camp)) continue;
+        const int filled=spawn::fill(actor);
+        if(filled<0) {++spawn_refused;continue;}
+        spawn_filled+=static_cast<unsigned long long>(filled);
+        spawn_ready[camp]=actor;camps.push_back(camp);++fresh;
+    }
+    return camps;
 }
 int spawn_poll(const RC::LuaMadeSimple::Lua& lua) {
     if(spawn_camps.empty())
@@ -287,30 +402,29 @@ int spawn_poll(const RC::LuaMadeSimple::Lua& lua) {
     std::string gone_camps;
     try {
         ++spawn_polls;
-        std::vector<RC::Unreal::UObject*> found;
-        RC::Unreal::UObjectGlobals::FindAllOf(STR("EndFieldEnemyTerritoryServerBuildActor"),found);
-        std::unordered_set<RC::Unreal::UObject*> alive(found.begin(),found.end());
-        for(auto it=spawn_actor_camp.begin();it!=spawn_actor_camp.end();) {
-            if(!alive.contains(it->first)) {
-                const auto ready=spawn_ready.find(it->second);
-                if(ready!=spawn_ready.end() && ready->second==it->first) {
-                    spawn_ready.erase(ready);++gone;
-                    if(gone_camps.size()<8000) {gone_camps+=gone_camps.empty()?"":",";gone_camps+=std::string(it->second.begin(),it->second.end());}
+        auto* world=reinterpret_cast<RC::Unreal::UObject*>(static_cast<std::uintptr_t>(lua.get_integer(1)));
+        if(!world) throw std::runtime_error("no_world");
+        auto* levels=static_cast<RawPointers*>(world->GetValuePtrByPropertyName(STR("Levels")));
+        if(!sane(levels,4096)) throw std::runtime_error("levels_unreadable");
+        const std::vector<RC::Unreal::UObject*> now(levels->data,levels->data+levels->num);
+        if(now!=known_levels) {
+            ++spawn_level_changes;
+            const std::unordered_set<RC::Unreal::UObject*> present(now.begin(),now.end());
+            for(auto it=spawn_levels.begin();it!=spawn_levels.end();) {
+                if(present.contains(it->first)) {++it;continue;}
+                for(const auto& camp:it->second) {
+                    spawn_ready.erase(camp);++gone;
+                    if(gone_camps.size()<8000) {gone_camps+=gone_camps.empty()?"":",";gone_camps+=std::string(camp.begin(),camp.end());}
                 }
-                it=spawn_actor_camp.erase(it);
-            } else ++it;
-        }
-        for(auto* object:found) {
-            if(spawn_actor_camp.contains(object)) continue;
-            const auto full=object->GetFullName();
-            if(!full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) continue;
-            const auto camp=camp_of(full);
-            ++spawn_seen;
-            if(!spawn_camps.contains(camp)) {spawn_actor_camp[object]=L"";continue;}
-            const int filled=spawn::fill(object);
-            if(filled<0) {++spawn_refused;continue;}
-            spawn_filled+=static_cast<unsigned long long>(filled);
-            spawn_actor_camp[object]=camp;spawn_ready[camp]=object;++fresh;
+                it=spawn_levels.erase(it);
+            }
+            const std::unordered_set<RC::Unreal::UObject*> before(known_levels.begin(),known_levels.end());
+            for(auto* level:now) {
+                if(!level || before.contains(level)) continue;
+                if(level->GetFullName().find(L"_World_Navigation_Mod_ServerBuild:PersistentLevel")==std::wstring::npos) continue;
+                spawn_levels[level]=prepare_spawn_level(level,fresh);
+            }
+            known_levels=now;
         }
     } catch(...) {++spawn_refused;}
     lua.set_string("{\"fresh\":"+std::to_string(fresh)+",\"gone\":"+std::to_string(gone)+",\"gone_camps\":\""+gone_camps+"\"}");
@@ -323,7 +437,7 @@ int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
     return 1;
 }
 int spawn_stats(const RC::LuaMadeSimple::Lua& lua) {
-    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+",\"polls\":"+std::to_string(spawn_polls)+"}");
+    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+",\"polls\":"+std::to_string(spawn_polls)+",\"level_changes\":"+std::to_string(spawn_level_changes)+"}");
     return 1;
 }
 class Runtime : public RC::CppUserModBase {

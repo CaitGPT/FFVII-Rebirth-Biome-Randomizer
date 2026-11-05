@@ -1,18 +1,20 @@
 -- Chooses each generic camp's next composition. A camp's counter advances once for each fight against
--- it that ends without a Game Over, and the seed, camp and counter pick the composition from its pool.
--- The game's own respawning does the rest, so a camp changes the next time it spawns.
+-- it that ends without a Game Over, and the seed, camp and counter pick what stands in each of its slots
+-- and how many there are. The game's own respawning does the rest, so a camp changes when it next spawns.
 --
 -- This runs on the game thread during recording sessions, so it must stay cheap: object path lookups
--- cost milliseconds, so anything lasting the whole process is found once, and tables only after a load.
+-- cost milliseconds, so anything lasting the whole process is found once, and tables only on a level change.
 local Lifecycle=require('lifecycle')
 local StateStore=require('state_store')
 local json=require('biome_json')
 local tables=require('world_pools')
 local M={}
 local idle_seconds,battle_seconds=1,0.5
-local load_ticks=3 -- this many seconds with no player and no battle: stop touching the game's APIs
+local load_ticks=3 -- this many ticks with no player and no battle: stop touching the game's APIs
 -- A level's groups spawn soon after its spawn actors appear, so they're looked for often. It's cheap.
 local poll_seconds=0.25
+local unlock_seconds=20 -- how long after a won assignment to wait for its enemies to be gone
+local repeat_tries=8
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -36,15 +38,24 @@ local function unwrap(value)
     end
     return value
 end
+local function key_of(enemies,counts)
+    return 't:'..table.concat(enemies,'.')..'/c:'..table.concat(counts,'.')
+end
+-- A total spread over the slots, as evenly as possible.
+local function split(total,slots)
+    local out={}
+    for k=1,slots do out[k]=total//slots+(k<=total%slots and 1 or 0) end
+    return out
+end
 function M.new(config)
-    local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},pending={},
-        camp_table={},pools={},tokens={},poll_at=0}
+    local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},
+        camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={}}
     for index,entry in ipairs(tables) do
         for target,camp in ipairs(entry.camps) do
-            local pool={};for k=1,camp.options do pool[k]=k-1 end
-            self.pools[camp.id]=pool
             self.camp_table[camp.id]={table=index,target=target}
+            self.camp_info[camp.id]={entry=entry,camp=camp}
         end
+        for _,unlock in ipairs(entry.unlocks) do self.assignment_of[unlock.territory]={entry=entry,name=entry.names[unlock.enemy+1]} end
     end
     local function fail(reason)
         if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
@@ -81,13 +92,44 @@ function M.new(config)
     end
     local function initialize()
         if self.store then return end
+        local camps={};for camp in pairs(self.camp_table) do camps[camp]=true end
         self.store=StateStore.new({json=json,read=BiomeRandomizerReadState,write=BiomeRandomizerWriteState,
             write_async=BiomeRandomizerWriteStateAsync,random_seed=BiomeRandomizerRandomSeed,seed=config.seed,
-            algorithm=Lifecycle.algorithm,scope='field-camps-v1',pools=self.pools})
-        emit('selector_ready',{seed=self.store.seed,algorithm=Lifecycle.algorithm})
+            algorithm=Lifecycle.algorithm,scope='field-camps-v1',pools=camps})
+        emit('selector_ready',{seed=self.store.seed,algorithm=Lifecycle.algorithm,unlocked=#self.store.unlocked})
     end
+    local function pick(salt,cycle,pool)
+        return Lifecycle.selection(self.store.seed,salt,cycle,pool,BiomeRandomizerSHA256)
+    end
+    -- What stands in each slot and how many: seeded by camp and counter, from the camp's own
+    -- enemies plus any its region's won assignments have added. Salt k gives another roll.
+    local function roll(camp,cycle,k)
+        local info=self.camp_info[camp];local names=info.entry.names;local unlocked=self.store.unlocked_set
+        local tag=k>0 and ('~'..k) or ''
+        local enemies={}
+        for slot,base in ipairs(info.camp.base) do
+            local pool={};for _,enemy in ipairs(base) do pool[#pool+1]=enemy end
+            for _,enemy in ipairs(info.camp.extra[slot]) do
+                if unlocked[names[enemy+1]] then pool[#pool+1]=enemy end
+            end
+            enemies[slot]=pick(camp..'#'..slot..tag,cycle,pool)
+        end
+        local total=pick(camp..'#n'..tag,cycle,info.camp.totals)
+        return key_of(enemies,split(total,#enemies))
+    end
+    -- Never the same composition twice running: a roll matching the one before it rolls again. Each
+    -- camp's sequence is worked out once and kept, until a won assignment changes what can be rolled.
     local function choice_of(camp,cycle)
-        return Lifecycle.selection(self.store.seed,camp,cycle,self.pools[camp],BiomeRandomizerSHA256)
+        local known=self.chosen[camp]
+        if not known then known={[-1]=self.camp_info[camp].camp.original};self.chosen[camp]=known end
+        for c=0,cycle do
+            if known[c]==nil then
+                local key=roll(camp,c,0);local k=0
+                while key==known[c-1] and k<repeat_tries do k=k+1;key=roll(camp,c,k) end
+                known[c]=key
+            end
+        end
+        return known[cycle]
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
@@ -102,8 +144,8 @@ function M.new(config)
         if self.current[index] then
             for target=1,#entry.camps do assert(status.choices[target]==self.current[index][target],'external_reference_change') end
         else
-            -- A fresh table holds the original references. Anything else is another mod's write.
-            for target=1,#entry.camps do assert(status.choices[target]==0,'preexisting_reference_change') end
+            -- A fresh table holds the original lists. Anything else is another writer.
+            for target=1,#entry.camps do assert(status.choices[target]=='o','preexisting_reference_change') end
         end
         self.tokens[index]=token;self.loaded[index]=object
         local changed=0;local waiting=0
@@ -126,7 +168,7 @@ function M.new(config)
     end
     -- A table can outlive the level that uses it, and the new level's spawn actors start with empty
     -- lists. A changed row left behind could ask for a size that isn't there yet, which crashes the
-    -- game. So a region's table goes back to the game's own references as its level begins.
+    -- game. So a region's table goes back to the game's own lists as its level leaves.
     local function restore_table(index)
         local entry=tables[index]
         local object=resolve(entry.asset)
@@ -136,8 +178,8 @@ function M.new(config)
         if not status.ok then return 0 end
         local restored=0
         for target=1,#entry.camps do
-            if status.choices[target]~=0 then
-                local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,status.choices[target],0))
+            if status.choices[target]~='o' then
+                local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,status.choices[target],'o'))
                 assert(result.ok,'restore_unverified:'..tostring(result.reason))
                 status=result;restored=restored+1
             end
@@ -149,7 +191,10 @@ function M.new(config)
     local function poll_spawn_actors(now)
         if now<self.poll_at then return end
         self.poll_at=now+poll_seconds
-        local result=json.decode(BiomeRandomizerSpawnPoll())
+        local engine=self.engine;if not valid(engine) then return end
+        local viewport=engine.GameViewport;if not valid(viewport) then return end
+        local world=viewport.World;if not valid(world) then return end
+        local result=json.decode(BiomeRandomizerSpawnPoll(world:GetAddress()))
         if result.gone>0 then
             local regions={}
             for camp in result.gone_camps:gmatch('[^,]+') do
@@ -185,18 +230,27 @@ function M.new(config)
         for _,entry in ipairs(out) do
             local actor=unwrap(entry)
             if valid(actor) then
-                local camp=text(battle:GetActorName(actor)):match('@(.+)$')
-                if camp and self.pools[camp] and not self.fight.camps[camp] then
+                local name=text(battle:GetActorName(actor))
+                local camp=name:match('@(.+)$')
+                if camp and self.camp_table[camp] and not self.fight.camps[camp] then
                     self.fight.camps[camp]=true
                     emit('fight_observed',{camp=camp,cycle=self.store.cycles[camp].cycle})
+                elseif camp and self.assignment_of[camp] then
+                    self.fight.assignments[camp]=self.fight.assignments[camp] or {}
+                    self.fight.assignments[camp][name]=true
                 end
             end
         end
     end
-    local function finish_fight(battle,party)
+    local function finish_fight(battle,party,now)
         local fight=self.fight;self.fight=nil
-        if fight.lost or not next(fight.camps) then return end
+        if fight.lost then return end
         if party_alive(battle,party)==0 then return end -- a Game Over, not a fight won or fled
+        -- An assignment counts as won once its enemies are gone from the field, not merely left behind.
+        for territory,names in pairs(fight.assignments) do
+            self.pending_unlocks[territory]={names=names,until_at=now+unlock_seconds}
+        end
+        if not next(fight.camps) then return end
         local cycles={};for camp,row in pairs(self.store.cycles) do cycles[camp]={cycle=row.cycle} end
         for camp in pairs(fight.camps) do
             local cycle=cycles[camp].cycle+1;cycles[camp].cycle=cycle
@@ -210,6 +264,26 @@ function M.new(config)
                 current[where.target]=desired
             end
             emit('cycle_committed',{camp=camp,cycle=cycle,before=before,after=desired})
+        end
+    end
+    local function check_unlocks(battle,now)
+        for territory,pending in pairs(self.pending_unlocks) do
+            local standing=false
+            for name in pairs(pending.names) do
+                local actor=battle:GetCharaFromActorName(FName(name),true)
+                if valid(actor) and (battle:GetCharaHP(actor) or 0)>0 then standing=true end
+            end
+            if not standing then
+                self.pending_unlocks[territory]=nil
+                local enemy=self.assignment_of[territory].name
+                if self.store:unlock(enemy) then
+                    self.chosen={}
+                    emit('assignment_unlocked',{territory=territory,enemy=enemy})
+                    -- Only compositions chosen from now on can use it: the next sweep or fight picks it up.
+                end
+            elseif now>pending.until_at then
+                self.pending_unlocks[territory]=nil -- still standing: the party fled
+            end
         end
     end
     function self:step()
@@ -241,16 +315,19 @@ function M.new(config)
             initialize()
             if in_battle then
                 self.next_step=now+battle_seconds
-                self.fight=self.fight or {camps={}}
+                self.fight=self.fight or {camps={},assignments={}}
                 note_camps(battle)
                 if party_alive(battle,party)==0 then self.fight.lost=true end
                 return
             end
             if not actor then return end
-            if self.fight then finish_fight(battle,party) end
+            if self.fight then finish_fight(battle,party,now) end
+            if next(self.pending_unlocks) then check_unlocks(battle,now) end
         end)
         if not ok then fail(error_value) end
     end
+    -- For the offline fixtures only: the composition a camp gets at a counter value.
+    function self.choice_of_for_tests(camp,cycle) initialize();return choice_of(camp,cycle) end
     return self
 end
 return M
