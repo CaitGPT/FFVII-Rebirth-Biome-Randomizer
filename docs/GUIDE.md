@@ -51,7 +51,7 @@ Another mod editing regional EnemyTerritory data or its references is incompatib
 
 ## Build from source
 
-Runtime source is in `runtime/Native` and `runtime/Scripts`. Build the DLL with MSVC 2022, CMake 3.22+ and the pinned loader's compatible interface/import library. CMake takes `INSTALLED_INTERFACE`, `UE4SS_SOURCE`, `UEPSEUDO_SOURCE`, `IMGUI_SOURCE`, `IMGUI_TEXT_EDIT_SOURCE`, `ZYDIS_SOURCE` and `UE4SS_IMPORT_LIB`. Development uses an interface snapshot prepared by the parent FFVII-Modding project's `Tools/ff7r-telemetry-exporter/Prepare-InstalledUe4ssInterface.py`. A portable, independently reproducible SDK recipe remains a release prerequisite; the local development script alone is not one.
+Runtime source is in `runtime/Native` and `runtime/Scripts`. [The pinned build recipe](../runtime/BUILDING.md) records exact SDK commits, authenticated UEPseudo access, import-library generation from the tested loader and parameterized build commands. The repaired source compiled through that recipe with a newly generated import library. It never installs files or starts the game. Exact public-loader download correspondence remains a separate release prerequisite.
 
 Run the Python tests in `runtime/tests` with Lua 5.4 and the compiled `RuntimeArgumentTests` executable. Synthetic results do not pass native acceptance cases.
 

@@ -6,7 +6,7 @@ Owner decisions,2026-11-04.
 
 Keep the game's existing ordinary camp locations and native encounter/respawn management. Choose a fresh biome/progression/arena-compatible composition each time a cleared camp legitimately respawns. Keep a living group's composition stable. Preserve bosses, hunts, scripted and quest-critical encounters. Provide reproducible selection for diagnostics without requiring a new package for each respawn.
 
-The current build-time seeded package is a working baseline, not the finished runtime behavior. Its first pool has Mu/Kalm Fang plus two Orcs at four reviewed level15 Grasslands camps. Runtime lifecycle selection and broader validated pools remain development work. The experimental Mandragora correction proves one scoped category boundary can be crossed, not universal compatibility.
+The first runtime pool has Mu/Kalm Fang plus two Orcs at four reviewed level15 Grasslands camps. Automatic lifecycle selection and persistence are implemented as a prototype, with native clear-to-respawn checks and final regression QA underway. Broader validated pools remain future work. The earlier build-time package is retained only as a research baseline. The experimental Mandragora correction proves one scoped category boundary can be crossed, not universal compatibility.
 
 Acceptance includes native clear→respawn transitions with changed compositions, no reroll caused merely by a live group unloading, reproducible diagnostic sequences, protected encounters unchanged and ordinary encounter completion. Define and document mod-state persistence separately from game save data.
 

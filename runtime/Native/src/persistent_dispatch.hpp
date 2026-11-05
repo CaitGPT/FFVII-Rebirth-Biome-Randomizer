@@ -3,11 +3,13 @@
 #include <Unreal/UObject.hpp>
 #include <Unreal/NameTypes.hpp>
 #include <Unreal/Common.hpp>
+#include <DynamicOutput/Output.hpp>
 #include <Windows.h>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 
 // Exported by the tested c0a8d4c loader; absent from the older template header.
 namespace RC::Unreal {
@@ -41,6 +43,15 @@ class PersistentDispatch {
         DWORD (*window_thread)(){};
     };
     std::shared_ptr<State> state=std::make_shared<State>();
+    static void log(std::string message) noexcept {
+        if(message.size()>1024) message.resize(1024);
+        message="[BiomeRandomizerRuntime] "+message+"\n";
+        printf_s("%s",message.c_str());
+        try {
+            const std::wstring wide(message.begin(),message.end());
+            RC::Output::send(std::wstring_view(wide));
+        } catch(...) {} // logging cannot reopen a failed callback
+    }
     static std::string ascii(std::wstring_view value) {
         std::string out;out.reserve(value.size());
         for(auto c:value){if(c>127) return {};out.push_back(static_cast<char>(c));}
@@ -78,15 +89,16 @@ class PersistentDispatch {
                 if(elapsed>shared->max_ms) shared->max_ms=elapsed;
                 ++shared->calls;
                 if(shared->calls==1 || shared->calls%6000==0)
-                    printf_s("[BiomeRandomizerRuntime] persistent calls=%llu thread=%lu max_ms=%.3f\n",shared->calls,GetCurrentThreadId(),shared->max_ms);
+                    log("persistent calls="+std::to_string(shared->calls)+" thread="+std::to_string(GetCurrentThreadId())+
+                        " max_ms="+std::to_string(shared->max_ms));
                 shared->next=Clock::now()+std::chrono::milliseconds(100);
             }
         } catch(const std::exception& error) {
             shared->fault=true;
-            printf_s("[BiomeRandomizerRuntime] persistent callback stopped: %s\n",error.what());
+            log(std::string("persistent callback stopped: ")+error.what());
         }
         while(lua->get_stack_size()>top) lua->discard_value(-1);
-        if(lua->get_stack_size()<top){shared->fault=true;printf_s("[BiomeRandomizerRuntime] persistent stack imbalance; stopped\n");}
+        if(lua->get_stack_size()<top){shared->fault=true;log("persistent stack imbalance; stopped");}
         shared->dispatching=false;
     }
 public:
@@ -94,7 +106,7 @@ public:
     void install() {
         state->name=reinterpret_cast<State::NameGetter>(GetProcAddress(GetModuleHandleW(L"UE4SS.dll"),
             "?GetNamePrivate@UObjectBase@Unreal@RC@@QEBAAEBVFName@23@XZ"));
-        if(!state->name){state->fault=true;printf_s("[BiomeRandomizerRuntime] pinned name getter unavailable; stopped\n");return;}
+        if(!state->name){state->fault=true;log("pinned name getter unavailable; stopped");return;}
         state->begin=RC::Unreal::FName(L"ReceiveBeginPlay",RC::Unreal::FNAME_Find);
         state->end=RC::Unreal::FName(L"ReceiveEndPlay",RC::Unreal::FNAME_Find);
         auto shared=state;
@@ -107,9 +119,9 @@ public:
         if(!state->pending) return;
         auto* main=state->pending;state->pending=nullptr;
         if(!main->is_global_function("BiomeRandomizerTick") || !main->is_global_function("BiomeRandomizerTerritoryBegin") ||
-           !main->is_global_function("BiomeRandomizerActorEnd")){state->fault=true;printf_s("[BiomeRandomizerRuntime] paired persistent entry points missing; stopped\n");return;}
+           !main->is_global_function("BiomeRandomizerActorEnd")){state->fault=true;log("paired persistent entry points missing; stopped");return;}
         state->current=main;state->next={};
-        printf_s("[BiomeRandomizerRuntime] persistent main state attached, period=100ms\n");
+        log("persistent main state attached, period=100ms");
     }
     void detach(){std::lock_guard guard(state->mutex);state->current=nullptr;state->pending=nullptr;}
     ~PersistentDispatch(){std::lock_guard guard(state->mutex);state->alive=false;state->current=nullptr;state->pending=nullptr;}
