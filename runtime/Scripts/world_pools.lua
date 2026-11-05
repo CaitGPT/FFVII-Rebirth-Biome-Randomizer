@@ -3,7 +3,7 @@
 return {
   {asset="/Game/DataObject/Field/1100-MIDGA/EnemyTerritory.EnemyTerritory",region="1100-MIDGA",
    names={"mobmidgar_KalmFang_00","mobmidgar_KalmFang_Rare_00","mobmidgar_Levrikon_00","mobmidgar_Levrikon_Rare_00","mobmidgar_Mandragora_00","mobmidgar_Mu_00","mobmidgar_Ogre_Orc_00","mobmidgar_WereRat_00"},
-   unlocks={{territory="Grassland_midgamob_04",enemy=3},{territory="Grassland_midgamob_10",enemy=1}},
+   unlocks={{territory="Grassland_midgamob_04",enemy=3,flag="stfWorldReport_Finish_GRASA_024"},{territory="Grassland_midgamob_10",enemy=1,flag="stfWorldReport_Finish_GRASA_029"}},
    camps={
     {id="Grassland_midgamob_01",base={{0,2,4,5,6,7}},extra={{1,3}},totals={2,3,4},original="t:0/c:2"},
     {id="Grassland_midgamob_02",base={{0,2,4,5,6,7},{0,2,4,5,6,7}},extra={{1,3},{1,3}},totals={2,3,4},original="t:4.6/c:2.2"},
@@ -18,7 +18,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory",region="1200-GRASA",
    names={"mobgrasa_Elfadunk_00","mobgrasa_Elfadunk_Rare_00","mobgrasa_KalmFang_00","mobgrasa_Levrikon_00","mobgrasa_Mandragora_00","mobgrasa_Mandragora_Rare_00","mobgrasa_Mu_00","mobgrasa_Mu_Rare_00","mobgrasa_Ogre_Orc_00","mobgrasa_WereRat_00","mobgrasa_WereRat_Rare_00"},
-   unlocks={{territory="Grassland_mob_08",enemy=5},{territory="Grassland_mob_09",enemy=10},{territory="Grassland_mob_12",enemy=1},{territory="Grassland_swampmob_03",enemy=7}},
+   unlocks={{territory="Grassland_mob_08",enemy=5,flag="stfWorldReport_Finish_GRASA_017"},{territory="Grassland_mob_09",enemy=10,flag="stfWorldReport_Finish_GRASA_002"},{territory="Grassland_mob_12",enemy=1,flag="stfWorldReport_Finish_GRASA_009"},{territory="Grassland_swampmob_03",enemy=7,flag="stfWorldReport_Finish_GRASA_014"}},
    camps={
     {id="Grassland_mob_02",base={{0,2,3,4,6,8,9},{0,2,3,4,6,8,9}},extra={{1,5,7,10},{1,5,7,10}},totals={2,3,4},original="t:4.8/c:1.2"},
     {id="Grassland_mob_03",base={{0,2,3,4,6,8,9}},extra={{1,5,7,10}},totals={1,2,3,4},original="t:8/c:3"},
@@ -57,7 +57,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory",region="1300-JUNOA",
    names={"mobjunon_Capparwire_00","mobjunon_Formula_00","mobjunon_Formula_Rare_00","mobjunon_Nerosuferoth_00","mobjunon_Nerosuferoth_Rare_00","mobjunon_Tonadu_00","mobjunon_Tonadu_Rare_00","mobjunon_Zemzelett_00","mobjunon_Zemzelett_Rare_00"},
-   unlocks={{territory="JunonArea_mob_13",enemy=6},{territory="JunonEastArea_mob_11",enemy=8},{territory="JunonEastArea_mob_14",enemy=2},{territory="JunonEastArea_mob_15",enemy=4}},
+   unlocks={{territory="JunonArea_mob_13",enemy=6,flag="stfWorldReport_Finish_JUNOA_004"},{territory="JunonEastArea_mob_11",enemy=8,flag="stfWorldReport_Finish_JUNOA_013"},{territory="JunonEastArea_mob_14",enemy=2,flag="stfWorldReport_Finish_JUNOA_025"},{territory="JunonEastArea_mob_15",enemy=4,flag="stfWorldReport_Finish_JUNOA_020"}},
    camps={
     {id="JunonArea_mob_01",base={{1}},extra={{2,6}},totals={1,2,3,4},original="t:1/c:2"},
     {id="JunonArea_mob_04",base={{0,3}},extra={{4}},totals={1,2,3,4},original="t:0/c:3"},
@@ -86,7 +86,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/2200-CORLA/EnemyTerritory.EnemyTerritory",region="2200-CORLA",
    names={"mobcorla_Beachplug_00","mobcorla_Beachplug_Rare_00","mobcorla_Cactuar_00","mobcorla_Chimaera_00","mobcorla_Chimaera_Rare_00","mobcorla_ChuseTank_Sea_00","mobcorla_ChuseTank_Sea_Rare_00","mobcorla_CrownLance_00","mobcorla_Deenglow_Flapbeat_00","mobcorla_LandWorm_00","mobcorla_LandWorm_Rare_00","mobcorla_NeedleKiss_00","mobcorla_NeedleKiss_Rare_00","mobcorla_PuzoCute_Tropical_00","mobcorla_Spencer_00","mobcorla_Spencer_Rare_00"},
-   unlocks={{territory="Corla_mob_01",enemy=1},{territory="Corla_mob_02",enemy=6},{territory="Corla_mob_03",enemy=12},{territory="Corla_mob_04",enemy=10},{territory="Corla_mob_05",enemy=15},{territory="Corla_mob_06",enemy=4}},
+   unlocks={{territory="Corla_mob_01",enemy=1,flag="stfWorldReport_Finish_CORLA_002"},{territory="Corla_mob_02",enemy=6,flag="stfWorldReport_Finish_CORLA_007"},{territory="Corla_mob_03",enemy=12,flag="stfWorldReport_Finish_CORLA_012"},{territory="Corla_mob_04",enemy=10,flag="stfWorldReport_Finish_CORLA_017"},{territory="Corla_mob_05",enemy=15,flag="stfWorldReport_Finish_CORLA_022"},{territory="Corla_mob_06",enemy=4,flag="stfWorldReport_Finish_CORLA_027"}},
    camps={
     {id="Corla_southem_mob_05",base={{0,5,7}},extra={{1,4,6,10,15}},totals={1,2,3,4},original="t:0/c:2"},
     {id="Corla_southem_mob_07",base={{11,13}},extra={{12}},totals={1,2,3,4},original="t:11/c:3"},
@@ -130,7 +130,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/2400-GONGA/EnemyTerritory.EnemyTerritory",region="2400-GONGA",
    names={"mobgonga_FlowerProng_00","mobgonga_FlowerProng_Rare_00","mobgonga_Gagighandi_00","mobgonga_Gagighandi_Rare_00","mobgonga_GrandHorn_00","mobgonga_GrandHorn_Rare_00","mobgonga_GrandHorn_Savage_00","mobgonga_KimaraBug_Gongaga_00","mobgonga_TouchMe_00","mobgonga_TouchMe_Rare_00"},
-   unlocks={{territory="Gongaga_mob_09",enemy=9},{territory="Gongaga_tomako_mob_09",enemy=1},{territory="Gongaga_west_mob_02",enemy=5},{territory="Gongaga_west_mob_03",enemy=6},{territory="Gongaga_west_mob_20",enemy=3}},
+   unlocks={{territory="Gongaga_mob_09",enemy=9,flag="stfWorldReport_Finish_GONGA_003"},{territory="Gongaga_tomako_mob_09",enemy=1,flag="stfWorldReport_Finish_GONGA_008"},{territory="Gongaga_west_mob_02",enemy=5,flag="stfWorldReport_Finish_GONGA_014"},{territory="Gongaga_west_mob_03",enemy=6,flag="stfWorldReport_Finish_GONGA_018"},{territory="Gongaga_west_mob_20",enemy=3,flag="stfWorldReport_Finish_GONGA_028"}},
    camps={
     {id="Gongaga_mob_02",base={{0},{7,8}},extra={{1},{3,5,6,9}},totals={2,3,4,5},original="t:0.8/c:2.3"},
     {id="Gongaga_mob_03",base={{0},{7,8}},extra={{1},{3,5,6,9}},totals={2,3,4,5},original="t:0.8/c:1.2"},
@@ -172,7 +172,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/2500-CSMOA/EnemyTerritory.EnemyTerritory",region="2500-CSMOA",
    names={"mobcsmoa_Bagrisk_00","mobcsmoa_Bagrisk_Rare_00","mobcsmoa_Capparwire_Rare_00","mobcsmoa_Golem_00","mobcsmoa_Golem_Rare_00","mobcsmoa_Griffin_00","mobcsmoa_Griffin_Rare_00","mobcsmoa_Sahagin_DesertRare_00","mobcsmoa_Sahagin_Desert_00","mobcsmoa_Skeeskee_00","mobcsmoa_Skeeskee_Rare_00"},
-   unlocks={{territory="CsmoaSubjugation_mob_01",enemy=7},{territory="CsmoaSubjugation_mob_02",enemy=10},{territory="CsmoaSubjugation_mob_03",enemy=6},{territory="CsmoaSubjugation_mob_04",enemy=2},{territory="CsmoaSubjugation_mob_05",enemy=1},{territory="CsmoaSubjugation_mob_06",enemy=4}},
+   unlocks={{territory="CsmoaSubjugation_mob_01",enemy=7,flag="stfWorldReport_Finish_CSMOA_008"},{territory="CsmoaSubjugation_mob_02",enemy=10,flag="stfWorldReport_Finish_CSMOA_007"},{territory="CsmoaSubjugation_mob_03",enemy=6,flag="stfWorldReport_Finish_CSMOA_013"},{territory="CsmoaSubjugation_mob_04",enemy=2,flag="stfWorldReport_Finish_CSMOA_017"},{territory="CsmoaSubjugation_mob_05",enemy=1,flag="stfWorldReport_Finish_CSMOA_022"},{territory="CsmoaSubjugation_mob_06",enemy=4,flag="stfWorldReport_Finish_CSMOA_027"}},
    camps={
     {id="CsmoaArea_mob_01",base={{0,3,5,8,9}},extra={{1,2,4,7,10}},totals={1,2,3,4,5},original="t:9/c:2"},
     {id="CsmoaArea_mob_02",base={{0,3,5,8,9}},extra={{1,2,4,7,10}},totals={1,2,3,4,5},original="t:8/c:2"},
@@ -218,7 +218,7 @@ return {
   }},
   {asset="/Game/DataObject/Field/2600-NIBLA/EnemyTerritory.EnemyTerritory",region="2600-NIBLA",
    names={"mobnibla_BatteryCap01","mobnibla_KyuvildunsRare01","mobnibla_NibelWolf01","mobnibla_NibelWolfRare01","mobnibla_Valron01","mobnibla_ValronRare01","mobnibla_VelcherTask01","mobnibla_VelcherTaskRare01","mobnibla_Zoo01","mobnibla_kyuvilduns01"},
-   unlocks={{territory="NiblaEastArea_mob_01",enemy=3},{territory="NiblaEastArea_mob_02",enemy=1},{territory="NiblaEastArea_mob_03",enemy=5},{territory="NiblaEastArea_mob_04",enemy=7}},
+   unlocks={{territory="NiblaEastArea_mob_01",enemy=3,flag="stfWorldReport_Finish_NIBLA_004"},{territory="NiblaEastArea_mob_02",enemy=1,flag="stfWorldReport_Finish_NIBLA_010"},{territory="NiblaEastArea_mob_03",enemy=5,flag="stfWorldReport_Finish_NIBLA_016"},{territory="NiblaEastArea_mob_04",enemy=7,flag="stfWorldReport_Finish_NIBLA_020"}},
    camps={
     {id="NiblaArea_mob_01",base={{2,4,6,9}},extra={{1,3,5,7}},totals={1,2,3,4},original="t:9/c:4"},
     {id="NiblaArea_mob_02",base={{2,4,6,9}},extra={{1,3,5,7}},totals={1,2,3,4},original="t:9/c:3"},

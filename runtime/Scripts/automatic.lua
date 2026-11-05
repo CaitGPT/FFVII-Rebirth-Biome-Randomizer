@@ -14,6 +14,7 @@ local load_ticks=3 -- this many ticks with no player and no battle: stop touchin
 -- A level's groups spawn soon after its spawn actors appear, so they're looked for often. It's cheap.
 local poll_seconds=0.25
 local unlock_seconds=20 -- how long after a won assignment to wait for its enemies to be gone
+local flag_delay=3 -- seconds after a load or a fight before reading the save's assignment records
 local repeat_tries=8
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
@@ -55,8 +56,11 @@ function M.new(config)
             self.camp_table[camp.id]={table=index,target=target}
             self.camp_info[camp.id]={entry=entry,camp=camp}
         end
-        for _,unlock in ipairs(entry.unlocks) do self.assignment_of[unlock.territory]={entry=entry,name=entry.names[unlock.enemy+1]} end
+        for _,unlock in ipairs(entry.unlocks) do
+            self.assignment_of[unlock.territory]={entry=entry,name=entry.names[unlock.enemy+1],flag=unlock.flag}
+        end
     end
+    local check_flags -- defined with the unlock checks below; the spawn poll calls it first
     local function fail(reason)
         if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
     end
@@ -88,6 +92,7 @@ function M.new(config)
         if not class:match('^PC%d%d%d%d_') and not class:match('^VE%d%d%d%d_') then return nil end
         if not actor:GetFullName():find('/Game/Level/Game/EndGame.EndGame:',1,true) then return nil end
         self.pawn_address=address
+        self.flags_due=os.clock() -- a new pawn: a load, so maybe another save's records
         return actor
     end
     local function initialize()
@@ -211,6 +216,7 @@ function M.new(config)
         end
         if result.fresh>0 then
             initialize()
+            check_flags() -- a load streams spawn levels in before the pawn: start it with its save's unlocks
             for index in ipairs(tables) do prepare_table(index) end
         end
     end
@@ -251,6 +257,7 @@ function M.new(config)
         local fight=self.fight;self.fight=nil
         if fight.lost then return end
         if party_alive(battle,party)==0 then return end -- a Game Over, not a fight won or fled
+        if next(fight.assignments) then self.flags_due=now+flag_delay end
         -- An assignment counts as won once its enemies are gone from the field, not merely left behind.
         for territory,names in pairs(fight.assignments) do
             self.pending_unlocks[territory]={names=names,until_at=now+unlock_seconds}
@@ -271,6 +278,25 @@ function M.new(config)
             emit('cycle_committed',{camp=camp,cycle=cycle,before=before,after=desired})
         end
     end
+    local function unlock(territory,enemy,source)
+        if self.store:unlock(enemy) then
+            self.chosen={}
+            emit('assignment_unlocked',{territory=territory,enemy=enemy,source=source})
+            -- Only compositions chosen from now on can use it: the next sweep or fight picks it up.
+        end
+    end
+    -- The save's own record of each won Combat Assignment: the World Report's completion flag, the same one
+    -- the Fiend Intel screen reads. This is what lets assignments won before the mod was installed count.
+    function check_flags()
+        local db=api('EndDataBaseAPI')
+        if not valid(db) then return end
+        for territory,info in pairs(self.assignment_of) do
+            if info.flag and not self.store.unlocked_set[info.name] then
+                local ok,won=pcall(function() return db:IsStoryFlag(FName(info.flag)) end)
+                if ok and won==true then unlock(territory,info.name,'save') end
+            end
+        end
+    end
     local function check_unlocks(battle,now)
         for territory,pending in pairs(self.pending_unlocks) do
             local standing=false
@@ -280,12 +306,7 @@ function M.new(config)
             end
             if not standing then
                 self.pending_unlocks[territory]=nil
-                local enemy=self.assignment_of[territory].name
-                if self.store:unlock(enemy) then
-                    self.chosen={}
-                    emit('assignment_unlocked',{territory=territory,enemy=enemy})
-                    -- Only compositions chosen from now on can use it: the next sweep or fight picks it up.
-                end
+                unlock(territory,self.assignment_of[territory].name,'fight')
             elseif now>pending.until_at then
                 self.pending_unlocks[territory]=nil -- still standing: the party fled
             end
@@ -304,6 +325,8 @@ function M.new(config)
             if not actor and not self.pawn_seen then return end -- the title screen: don't touch the game yet
             self.pawn_seen=true
             self.next_step=math.min(self.next_step,now+poll_seconds)
+            -- Before the camp tables are prepared, so a load starts with its save's unlocks.
+            if actor and self.store and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags() end
             poll_spawn_actors(now)
             -- Past this point, with no pawn, the game may be loading or shutting down. Leave it alone.
             if not actor and self.pawnless>=load_ticks then return end
@@ -318,6 +341,7 @@ function M.new(config)
             end
             self.pawnless=0
             initialize()
+            if actor and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags() end
             if in_battle then
                 self.next_step=now+battle_seconds
                 self.fight=self.fight or {camps={},assignments={}}

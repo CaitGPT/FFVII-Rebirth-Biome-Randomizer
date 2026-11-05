@@ -108,6 +108,8 @@ class PersistentDispatch {
 #ifdef BIOME_DIAG
                 if(elapsed>5) ++shared->over5;
                 if(elapsed>16) ++shared->over16;
+                // At once, so the log's own timestamp and the events just above it say when and why.
+                if(elapsed>50) log("diag slow_tick_ms="+std::to_string(elapsed));
                 if(shared->calls%100==0) {
                     log("diag ticks="+std::to_string(shared->calls)+" tick_avg_ms="+std::to_string(shared->total_ms/100)+
                         " tick_max_ms="+std::to_string(shared->max_ms)+" ticks_over5="+std::to_string(shared->over5)+

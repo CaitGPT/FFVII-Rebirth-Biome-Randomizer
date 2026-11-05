@@ -1,47 +1,92 @@
 # How it works
 
-## Current runtime prototype
+The mod never adds enemies, camps or files to the game. It changes which enemies the game's own camp tables list for a camp,
+in memory, while the game runs, and lets the game spawn them as usual. For the story of how it got this way, see
+[HOW-WE-BUILT-IT.md](HOW-WE-BUILT-IT.md).
 
-The runtime changes compositions at four existing camps, using the game's normal population manager. It never manually creates enemies or changes a camp's location, count, level or respawn timer. Each reviewed camp contains two Orcs plus either one Kalm Fang or one Mu. The default pool needs only existing medium ground spawn points; the Mandragora small-point correction is a separate experiment.
+## The camp tables
 
-An automatic seed is generated once through Windows BCrypt and stored outside game saves. An explicit seed supports reproducible diagnostics. For each camp, `sha256-respawn-v1` hashes the length-framed algorithm, seed, camp ID and complete-clear counter; the first eight hexadecimal digits modulo two choose the next composition. This differs from the historical package algorithm below. A valid new roll can repeat the same composition.
+Each open-world region has an `EnemyTerritory` table (`/Game/DataObject/Field/<region>/EnemyTerritory`). Each row is a camp:
+which enemy templates it uses, how many of each (a minimum and a maximum, one byte per slot), their levels, where it spawns and
+when it respawns. The game keeps these tables frozen in memory. A list inside a row isn't stored inline. It's a 16-byte
+descriptor holding a relative pointer (`(target - descriptor) * 2 | 1`) and a length, and several rows often share one list.
 
-Only three exact, owned enemy identities at zero HP with native Dead state establish a complete clear. The party must be alive outside battle before committing it. Absence, partial kills, retreat, defeat and unloading are insufficient. A new party-actor epoch discards in-progress death evidence. Living groups keep their selection across streaming; fresh identities are rebound without advancing the counter. The state's seed and counters persist globally across saves; loading an earlier game save does not rewind them.
+So the mod never edits a list. For a camp it changes, it builds its own small lists (eight bytes per enemy name, one byte per
+count), allocated once and kept for the whole session, and points that row's three descriptors at them: enemies, minimum counts
+and maximum counts. Levels, positions, rewards and timers are untouched, which is why a swapped-in enemy gets the camp's level.
 
-The native table uses shared composition vectors. Editing their elements would affect unrelated camps. Instead, each permitted eight-byte row reference is redirected to an existing reviewed vector. All126 name tokens and the entire normalized19536-byte image are checked first. Names, flags, other rows, vector contents and all unrelated properties stay protected. A stale selection or conflicting writer refuses changes; uncertain write readback permanently disables further writes.
+## Which camps, and what can stand in them
 
-The state store writes a prepared-clear intent before changing a reference, then commits only after exact native readback. Atomic Windows replacement, previous-file backup and state readback protect the four counters. A restart can finish a proved, prepared intent once; it cannot infer a clear from missing actors. Corrupt or incompatible state stops operation.
+Nothing is decided at runtime that wasn't reviewed offline. Two generators read the owner's exports of the game's tables:
 
-After native QA found a transient Lua-state failure, the paired DLL replaced the async Lua loop with a persistent main-state callback on the verified game thread. Its100ms pacing, re-entry guard and failure latch avoid queued coroutine growth. Early territory startup and owned-enemy destroyed events use that same state. The script retains string identities instead of UObject wrappers across unload. This architecture still needs its own recorded acceptance and final conflict QA; see [testing](TESTING.md).
+- `tools/census.py` lists every territory row in the seven regions, with its enemies, counts, sizes, and every other table
+  that mentions it.
+- `tools/world_layout.py` picks the eligible camps: ordinary open-world camps, not named by any quest, story reset, scripted
+  state change or event, and not an assignment, boss, hunt or interior. That's 210 camps. For each region it writes the
+  enemies its camps use (the pool), the smallest and largest camp totals, the assignment fiends that can be unlocked, and the
+  World Report flag that records each assignment's win.
 
-## Historical fixed-package experiment
+It writes `runtime/Scripts/world_pools.lua` (the pools) and `runtime/Native/src/reviewed_layout.hpp` (table sizes, descriptor
+offsets and fingerprints). Neither contains game data beyond names and offsets.
 
-The remaining sections describe the earlier build-time generator and archive verification. That package is retained for research and is not installed alongside the runtime.
+## Checking before writing
 
-## Reviewed scope
+Before any write, the native part checks the live table against what was reviewed: the whole table image is hashed with its
+name fields masked and compared with the reviewed fingerprint, and every name is checked separately. Every row the mod may
+change must point either at the game's own list or at one of the mod's lists. A table that doesn't match is left alone.
 
-The input territory table contains forty-four rows. Four are selected explicitly: `Grassland_mob_05`, `Grassland_mob_23`, `Grassland_mob_29` and `Grassland_mob_30`. Each originally has one Kalm Fang and two Orcs, levels `[15,15]`, counts `[1,2]`, and field AI `[1,1]`. The alternate species list comes from ordinary native donor18 (Mu2+Orc2); only the species list is used, so each target retains Mu1+Orc2.
+All of a table's changes go through in one batch: one full check before, the writes, one full check after. If the read-back
+doesn't match what was written, a latch stops all further writes for the session.
 
-The original regional mob table maps templates to BattleCharaSpec, and the resident BattleCharaSpec table maps those to CharaSpec. All three pool enemies have exact PhysiqueSize1 and MoveType0. The build binds all four original asset hashes and validates these mappings, HPDirect0 and exact HP coefficients. A target-population-weighted HP coefficient budget is630 for Kalm1+Orc2 and500 for Mu1+Orc2 (79.4%). This bounds one dimension of difficulty; it is not an equal-difficulty claim.
+## Room to stand
 
-Mandragora has size0 and is excluded, including its native territory02. The prior Mandragora design crashed; the matched-size Mu replacement at05 spawned correctly and completed in game. See [the compatibility investigation](COMPATIBILITY.md). Matching categories establishes candidates, not universal swap acceptance.
+Each camp has its own spawn points, kept in separate lists by enemy size (`TerritoryGroundSpawnPoints_S`, `_M`, `_L`, `_2L`,
+`_3L`, `_4L`, and flying ones). Camps usually fill only the sizes their own enemies need, and asking for a size with no points
+crashes the game. So when a camp's spawn actor loads, the mod fills each empty list with a copy of the nearest size that has
+points.
 
-The story/reset-linked territory01 and its Media variant, swamp, rare, hunt, quest and boss encounters are excluded. Neither enemy names nor a region prefix authorizes a target. Structural source checks and the exact allowlist constrain the change; map scripts and encounter completion still require native evidence.
+Spawn actors live in levels named `*_World_Navigation_Mod_ServerBuild`. The mod watches the world's list of loaded levels and
+reacts when one appears or goes. A camp only gets a new composition once its spawn lists are filled. When a level unloads,
+its tables go back to the game's own lists first, and they're set again when the level returns.
 
-## Legacy build selection
+## Choosing a composition
 
-The algorithm hashes a canonical UTF-8 JSON array containing the algorithm ID, seed string, pool ID and target ID. The full SHA-256 integer modulo the number of sorted donor IDs chooses the donor. Sorting makes selection independent of dictionary and catalog list order. There is no global RNG state, current-time seed or dependency on route traversal order.
+A camp's composition depends only on the seed, the camp and that camp's counter. Each slot's enemy and the camp's total come from
+SHA-256 of `sha256-respawn-v1`, the seed, a salt (`<camp>#<slot>` for an enemy, `<camp>#n` for the total) and the counter, all
+length-prefixed. The first eight hex digits modulo the pool size pick from the pool. The total is spread over the slots as
+evenly as possible.
 
-The builder changes only `MobTemplateList_Array` in selected rows whose choice differs from vanilla. It preserves all other properties and every unselected row. It adds no rows and leaves EnemyTerritoryMob and all other assets out of the package. Selecting a vanilla composition is valid and is reported as an unchanged choice.
+If a roll matches the camp's previous composition (the game's own one, for the first roll), it rolls again with `~1`, `~2`
+and so on added to the salts. Each camp's sequence is worked out once and kept until an unlock changes the pools.
 
-## Verification
+## Counting fights
 
-The builder first verifies original binary SHA-256 hashes, exports the tables using DataBuilder's long CSV format, and checks each reviewed target and donor's structural constraints, count budgets and complete character mapping. DataBuilder edits and rereads its own result. A separate Python comparison rereads the output CSV and requires the exact expected change in every row and property. Original input hashes are checked again before success.
+During a battle the mod reads the battle's enemy roster. Field enemies are named `<template>@<territory>`, so each one names
+its camp. When the battle ends, every camp that was in it moves its counter on by one, unless the party is wiped out, which is
+a Game Over. Winning and running away both count. The new composition is set straight away for the camp's next respawn; the
+game's own timer and streaming decide when that is.
 
-The audit records the algorithm, seed, catalog and input hashes, per-target selections, modified asset hash and complete package hashes. Every IoStore block is decompressed and the packed asset is compared with the independently verified table. The final archive uses native Oodle compression, version-2 TOC fields, SHA-1 metadata and a valid Rebirth-shaped empty container header. The existing game's package-store metadata describes this existing asset. Generated packages remain labelled `packed_unvalidated` until a separate native test supplies evidence. The [packaging investigation](PACKAGING-INVESTIGATION.md) records the failed controls and why copying arbitrary UCAS prefix bytes was removed.
+## Combat Assignment unlocks
 
-In this historical package, choices remain stable through save/load and respawn because the mapping is baked into the archive. The runtime above instead changes guarded in-memory row references and keeps separate mod state. Neither implementation writes game save files.
+An assignment camp is never changed itself. Its fiend joins its region's pools, for slots of the same movement type, once the
+assignment has been won. The mod knows that two ways:
 
-## Limits
+- The save's record: when a save loads, before any camp is set up, and a few seconds after an assignment fight, it reads each
+  assignment's `stfWorldReport_Finish_*` story flag through `EndDataBaseAPI:IsStoryFlag`. This counts assignments won before the
+  mod was installed. The generator gets each flag from the intel hub table (`Hub`), which names the camp and its World Report,
+  and from that report's `CompleteFlag`.
+- The fight: the assignment's fiend was in a battle that ended without a Game Over, and is gone from the field afterwards.
 
-Only one small Grasslands pool has been researched. Swamp ecology, flying enemies, large enemies, rare spawns, progression scaling, authored fights and other regions are excluded. Level and count matching bound the initial change but do not establish equal difficulty. Collision, AI, streaming and encounter completion require recorded native validation. A fixture pass cannot satisfy these cases.
+Unlocks are kept in the state file, so they belong to the install, not the save.
+
+## State and timing
+
+`%LOCALAPPDATA%\FFVIIRebirthBiomeRandomizer\state-v1.json` holds the seed, each camp's counter and the unlocked fiends. It's
+written on a background thread (atomically, keeping the previous file), so a fight ending never waits for the disk.
+
+The Lua runs from a small native dispatcher on the game thread every 100 ms, on the mod's one long-lived Lua state. Work is only
+done when something changes. Idle ticks don't look objects up or read tables. Objects are found once and cached. When the game
+quits, the dispatcher stops at the first quit event, before the world is torn down.
+
+The DLL checks the SHA-256 of the running `UE4SS.dll` before registering anything, because a C++ mod is tied to the exact loader
+build it was compiled against. On any other build the mod stays off and says so in `UE4SS.log`.

@@ -13,8 +13,9 @@ and caught problems the agents had missed, including the biggest bug in this sto
 The goal was simple to say. When you go back to a camp of enemies in the open world, it shouldn't always be the same enemies. But they should still belong there,
 and the game should still work: no broken fights, no story encounters changed, nothing strange in the wrong place.
 
-The first version does that in a deliberately small way. Four ordinary camps in the Grasslands, each with two Orcs and either a Kalm Fang or a Mu. Most of this story
-is about why that small version took so long, because almost everything that could go wrong did.
+The first version did that in a deliberately small way: four ordinary camps in the Grasslands, each with two Orcs and either a Kalm
+Fang or a Mu. Steps 1 to 9 are about why that small version took so long, because almost everything that could go wrong did. From
+Step 10 it grows into the finished mod: 210 camps in seven regions, with mixed enemies, random counts and Combat Assignment unlocks.
 
 ## Tools
 
@@ -105,9 +106,74 @@ To be sure, Claude closed the game repeatedly in different setups. With our test
 
 A C++ mod is built against one exact version of UE4SS, and Nexus now lists several Rebirth builds. A mismatched one might crash the game rather than fail politely. So the module hashes the loader that's actually running before it touches anything, and if it's not the one we tested, it steps aside and says so in the log. We checked that the public 1.0.2 download contains exactly the file we tested against.
 
+## Step 10: the owner made it the whole world
+
+Four camps worked. Then the owner set the real target: every ordinary open-world camp in every region, never the story, side
+quests, Combat Assignments or one-off fights, and nothing indoors. Any size of enemy from the region, with a fallback to one size
+step either way if big enemies caused trouble (they didn't, and the owner judged the screenshots). Then two more rules: the
+number of enemies should be random too, anywhere between the region's smallest and largest camp, and each slot in a camp should
+pick its own enemy. No immediate repeats. And beating a region's Combat Assignment should add its fiend to that region's camps.
+
+## Step 11: a census of every table
+
+The open world has seven EnemyTerritory tables, one per region. `tools/census.py` reads them all from the game's exported data,
+along with every other table that mentions a camp. That second part is the safety check: a camp named by a quest, a story reset
+or a scripted state change is left out. 210 camps passed. Assignment camps are recognised the same way, by being a single rare or
+savage enemy that Chadley's intel hub points at.
+
+The generator hung on its first run. The minimum and maximum counts are one byte each, not four, and reading them as four turned
+"2" into a number in the millions. Reading bytes fixed it, and the mod gives each changed camp its own small byte lists for
+counts, because, like the enemy lists, the game's own are shared between rows.
+
+## Step 12: big enemies need big spawn points, and the hooks didn't fire
+
+Step 3's lesson came back at world scale. Each camp keeps separate spawn point lists by size, and most camps only fill the sizes
+their own enemies need. So when a camp's level loads, the mod fills each empty size list with a copy of the nearest size it does
+have. A Gagighandi can now stand where only Kimara Bugs used to.
+
+Finding those spawn actors was harder than expected. The game event Codex's design waited for didn't fire for camps that load as
+you arrive, so camps near the arrival point stayed vanilla. Searching for the actors every second worked but cost 40 to 90
+milliseconds a time. What works is watching the world's list of loaded levels: the camp spawn actors live in levels named
+`*_World_Navigation_Mod_ServerBuild`, and a level appearing or leaving is cheap to notice.
+
+## Step 13: the 318 millisecond arrival
+
+With mixes and counts in, the first fast travel into a region stalled for 318 milliseconds. Each camp's change checked the whole
+table twice, once before and once after, and a region has up to 41 camps. The native writer now takes every change for a table at
+once and checks it once on each side. We measured the cost again on the final build: up to about 600 milliseconds when a save
+loads, all of it while the loading screen is still up, and nothing over 50 milliseconds while walking 800 metres across the
+Grasslands.
+
+## Step 14: assignments, twice over
+
+The first unlock design watched the battle roster: if an assignment's fiend was in the fight and gone from the field afterwards,
+it counted. It worked in the game, for the Mandrake and Mi assignments on the Grasslands save.
+
+The owner also wanted assignments beaten before the mod was installed to count, if that could be read without opening the
+Fiend Intel screen. That looked impossible at first, until a harness check turned up the answer: the game keeps a story flag for
+each World Report, `stfWorldReport_Finish_<region>_<number>`, and the database interface will read it. The link from a camp to its
+report is in the intel hub table, which names the camp and the report. So the generator now writes each assignment's flag, and
+the mod reads them when a save loads, before the camp tables are set up, and again after an assignment fight. On a save with four
+of six Grasslands assignments won, exactly those four unlocked, and the other two didn't.
+
+## Step 15: getting there
+
+Testing world-wide meant travelling, and the harness found new ways to fail. A failed fast travel left the map open, which paused
+the game, and every route after it was refused. The Mi assignment sits in a swamp you can only cross on a chocobo, and the harness
+couldn't yet walk into the bird to mount it. Those are fixes for the harness, not the mod, and they're written up there.
+
+## Step 16: what we didn't build
+
+More camp locations was the idea the owner was most wary of. Every camp is a table row plus actors placed in a level, and new ones
+would mean new rows and new level actors, which is exactly the kind of change that crashed the first design. There are no spare,
+unused camp arenas to reuse either. So this version doesn't add camps. Difficulty caps, rare elites and settings were left out on
+purpose.
+
 ## What it doesn't do
 
-It's four camps and two enemy choices. That's a small pool, and the bigger ideas, more enemies and new camp locations, are in the [roadmap](ROADMAP.md). Equal numbers and levels don't mean equal difficulty: Mu and Kalm Fang fight differently. Our tests are listed in [TESTING.md](TESTING.md), including the ones that failed.
+It doesn't add camps or change where they are. Equal levels don't mean equal difficulty: a camp of one Mu can become four
+Levrikons, and that's the point, but some mixes are much harder than what they replaced. Our tests are listed in
+[TESTING.md](TESTING.md), including the ones that failed.
 
 ## Credits
 

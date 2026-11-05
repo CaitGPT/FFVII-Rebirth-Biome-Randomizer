@@ -10,7 +10,7 @@ ROOT=Path(__file__).parents[1]/'Scripts'
 # once its assignment is won.
 POOLS='''{{asset='/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory',region='1200-GRASA',
     names={'mobgrasa_KalmFang_00','mobgrasa_Mu_00','mobgrasa_Ogre_Orc_00','mobgrasa_WereRat_Rare_00'},
-    unlocks={{territory='Grassland_mob_09',enemy=3}},
+    unlocks={{territory='Grassland_mob_09',enemy=3,flag='stfWorldReport_Finish_GRASA_002'}},
     camps={{id='Grassland_mob_05',base={{0,1,2},{0,1,2}},extra={{3},{3}},totals={2,3,4},original='t:0.2/c:1.2'},
            {id='Grassland_mob_23',base={{0,1}},extra={{3}},totals={1,2,3},original='t:0/c:2'}}},
  {asset='/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory',region='1300-JUNOA',names={'mobjunon_Formula_00'},unlocks={},
@@ -38,6 +38,9 @@ local battle=object({
  GetActorName=function(_,a) return FName(a.name) end,
  GetCharaFromActorName=function(_,name) return field_enemies[name.name] end,
  GetCharaHP=function(_,a) return a.hp end})
+-- The save's story flags, as EndDataBaseAPI:IsStoryFlag reads them.
+story_flags={};flag_reads=0
+local database=object({IsStoryFlag=function(_,name) flag_reads=flag_reads+1;return story_flags[name.name]==true end})
 local party=object({GetBattleMemberCount=function() return #party_members end,GetBattleMember=function(_,i) return party_members[i+1] end})
 local viewport=object({World=object({GetAddress=function() return 77 end})});local engine=object({GameViewport=viewport})
 -- As in the game: no player pawn for the whole of a battle.
@@ -47,6 +50,7 @@ function StaticFindObject(path)
     if path=='/Script/Engine.Default__GameplayStatics' then return statics end
     if path=='/Script/EndGame.Default__EndBattleAPI' then return battle end
     if path=='/Script/EndGame.Default__EndPartyAPI' then return party end
+    if path=='/Script/EndGame.Default__EndDataBaseAPI' then return database end
     local index=loaded_assets[path]
     if index then return object({GetAddress=function() return index+1000 end}) end
 end
@@ -194,6 +198,31 @@ class Adapter(unittest.TestCase):
             for cycle=0,50 do assert(auto.choice_of_for_tests('JunonArea_mob_01',cycle):find('^t:0/'),'leaked into another region') end
         ''')
 
+    def test_an_assignment_won_before_the_mod_unlocks_on_load(self):
+        self.run_case('''
+            disk='';native_writes={};choices={[0]={'o','o'},[1]={'o'}};polled={}
+            story_flags['stfWorldReport_Finish_GRASA_002']=true
+            local fresh=Automatic.new({enabled=true,seed='613'});for i=1,3 do fresh:step() end
+            assert(not fresh.fault,fresh.fault)
+            assert(json.decode(disk).unlocked[1]=='mobgrasa_WereRat_Rare_00','not unlocked from the save')
+            local said=false;for _,line in ipairs(logs) do if line:find('"source":"save"',1,true) then said=true end end
+            assert(said,'no unlock event from the save')
+        ''')
+
+    def test_the_save_record_after_a_fight_unlocks_when_the_roster_missed_it(self):
+        self.run_case('''
+            fight({'mobgrasa_WereRat_Rare_000@Grassland_mob_09'})
+            story_flags['stfWorldReport_Finish_GRASA_002']=true
+            for i=1,3 do auto:step() end
+            assert(json.decode(disk).unlocked[1]=='mobgrasa_WereRat_Rare_00','the save record was not read after the fight')
+        ''')
+
+    def test_a_save_without_the_record_unlocks_nothing(self):
+        self.run_case('''
+            for i=1,10 do auto:step() end
+            assert(#(json.decode(disk).unlocked or {})==0,'unlocked with no record')
+        ''')
+
     def test_fleeing_an_assignment_unlocks_nothing(self):
         self.run_case('''
             fight({'mobgrasa_WereRat_Rare_000@Grassland_mob_09'})
@@ -245,9 +274,10 @@ class Adapter(unittest.TestCase):
     def test_idle_play_does_no_lookups_or_table_reads(self):
         # Path lookups stalled the game thread by 60 ms a tick before this design.
         self.run_case('''
-            auto:step();finds=0;status_calls=0
+            auto:step();finds=0;status_calls=0;flag_reads=0
             for i=1,100 do auto:step() end
             assert(finds==0,'idle ticks looked things up: '..finds)
+            assert(flag_reads==0,'idle ticks read story flags: '..flag_reads)
             assert(status_calls==0 and not auto.fault)
         ''')
 

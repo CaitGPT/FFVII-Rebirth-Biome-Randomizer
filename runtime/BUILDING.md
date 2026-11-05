@@ -21,7 +21,7 @@ Clone these source repositories into your own SDK directory and check out the co
 
 ## Import library and build
 
-The tested `UE4SS.dll` has SHA256 `3f5e8d934fe91ff26be2ce3585cef0940d3c73b40295adc09fa6e7b62bc0018f`. The loader itself is a separately installed dependency; this project does not redistribute it. Its public Rebirth distribution has multiple variants, whose exact correspondence to this hash remains a release prerequisite. The standard official zDEV3.0.1 DLL has a different hash and is not a verified replacement.
+The tested `UE4SS.dll` has SHA256 `3f5e8d934fe91ff26be2ce3585cef0940d3c73b40295adc09fa6e7b62bc0018f`. That is the `UE4SS.dll` in RE-UE4SS FF7R 1.0.2 on Nexus Mods (mod 267), checked byte for byte. The loader is a separate install; this project doesn't redistribute it. The standard official zDEV 3.0.1 DLL has a different hash and won't do.
 
 Generate the import library from the exact installed loader; no pre-existing development folder or checked-in library is required:
 
@@ -36,7 +36,7 @@ Generate the import library from the exact installed loader; no pre-existing dev
   -Ue4ssImportLib './build/loader-import/UE4SS.lib'
 ```
 
-These example paths are placeholders for your own directories. The import tool refuses a different loader hash, inventories its3185 exports, writes a definition file and uses Microsoft's librarian to build the matching x64 import library. Both outputs and their hashes remain in `build/loader-import/`. The build produces `build/runtime-portable/Release/main.dll` and runs the consuming-stack argument regression. It never installs files or starts the game. The existing SDK `TEXT` macro redefinition warning is retained; compilation succeeds.
+These example paths are placeholders for your own directories. The import tool refuses a different loader hash, inventories its3185 exports, writes a definition file and uses Microsoft's librarian to build the matching x64 import library. Both outputs and their hashes remain in `build/loader-import/`. Pass `-BuildDirectory build/runtime-release` for the release build. The build produces `<build directory>/Release/main.dll` and runs the consuming-stack argument regression. It never installs files or starts the game. The existing SDK `TEXT` macro redefinition warning is retained; compilation succeeds.
 
 The repaired native source was successfully compiled through this parameterized recipe with a newly generated import library on2026-11-05. A separate build folder can produce a different PE hash; only the exact installed and natively tested DLL is accepted for a release artifact. Keep its manifest with it.
 
@@ -46,4 +46,25 @@ Run the separate Lua fixtures:
 python -m unittest discover -s runtime/tests -v
 ```
 
-Fixtures cannot pass native placement, lifecycle, compatibility, save/load or removal cases. Follow [final QA](../docs/RELEASE-QA.md) before release.
+Fixtures can't stand in for the game; see [testing](../docs/TESTING.md) for what was checked there.
+
+## Regenerating the camp lists
+
+Only needed after a game update changes the camp tables. From the repository root, with the game's tables exported (FModel or
+similar) as `.uasset` under a `DataObject/Field` folder and as CSV under `Resident`:
+
+```powershell
+python tools/census.py <exported tables CSV root> docs/world-census.csv
+python tools/world_layout.py <exports>/End/Content/DataObject/Field docs/world-census.csv . --resident <CSV root>/Resident
+```
+
+This rewrites `runtime/Scripts/world_pools.lua` and `runtime/Native/src/reviewed_layout.hpp`; rebuild the DLL afterwards.
+
+## Release zip
+
+```powershell
+python tools/make_release.py 1.0.0 --installed 'C:/Games/Rebirth/End/Binaries/Win64/ue4ss/Mods'
+```
+
+It packs `build/runtime-release/Release/main.dll` and the scripts, refuses any file that differs from the installed, tested copy,
+and prints every hash.

@@ -1,24 +1,21 @@
 # Changelog
 
-## Unreleased: 1.0.0 runtime prototype
+## 1.0.0 (not released yet)
 
-- Replace the async Lua executor after native camp23 combat exposed a stopped Lua-state callback; persistent game-thread repair passes27 synthetic checks and awaits native acceptance.
-- Add runtime installation/removal instructions and a parameterized, commit-checked native build recipe. The tested loader's public-download correspondence still requires verification.
+- 210 open-world camps in seven regions change composition each time they've been fought.
+- Each slot picks its own enemy from the region's camp enemies, of any size. The total is random between the region's
+  smallest and largest camp. A new roll never repeats the one before.
+- Any fight against a camp moves it on, unless it ends in a Game Over.
+- Won Combat Assignments add their fiend to the region's pool, read from the save (so ones won before installing count) and
+  from the fight.
+- Empty spawn-size lists are filled from the nearest size, so bigger or smaller enemies have somewhere to stand.
+- Story, quest, assignment, boss, hunt and interior encounters are excluded by a census of every table that names a camp.
+- No data package: tables are changed in memory, after a fingerprint check, and read back.
+- The DLL checks the loader's hash and stays off on an untested UE4SS build.
+- Fixed: frame stalls from repeated object lookups (60–88 ms a tick, now under 1 ms idle), a stall when arriving in a region
+  (one batched check per table), and a crash on quitting from this mod's own callback.
 
-- Select a reproducible next composition after each verified full clear, using the game's native respawn manager and unchanged timer.
-- Add guarded, per-row reference writes without modifying shared composition vectors or requiring an overriding data package.
-- Persist the seed and per-camp counters outside game saves, with atomic readback and prepared-clear recovery.
-- Verify one automatic original-to-Mu native respawn, restart persistence, initial nonzero timing and living-group streaming without reroll at camp05.
-- Keep partial-clear defeats at the existing counter; preserve failed native attempts and full recordings.
-- Add a mandatory final regression/conflict gate. New startup conflict guards pass fixtures and await native acceptance. Broader pools, remaining arenas and final release acceptance remain pending.
+## 0.1.0-dev (2026-11-04, Codex)
 
-## 0.1.0-dev â€” 2026-11-04
-
-- Add an explicit four-encounter Grasslands pool with two existing local compositions.
-- Add reproducible build-time seed selection, original-input hash checks, audit output and independent verification of all table properties.
-- Preserve enemy levels, counts and every unselected row in the initial fixed package; add no data rows.
-- Native validation and release remain pending.
-
-- Bind exact physique/movement categories and complete character mappings; exclude the failed cross-size Mandragora pool.
-- Preserve target1+2 population when reusing native Mu donor2+2; check weighted HP coefficient budget.
-- Observe native Mu1+Orc2 spawn and completion at05; retain remaining acceptance work.
+- Four Grasslands camps, Kalm Fang or Mu with two Orcs, chosen at build time in a packed data table. Superseded by the
+  runtime design; kept in [research](research/README.md).

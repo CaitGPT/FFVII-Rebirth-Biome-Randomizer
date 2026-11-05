@@ -1,69 +1,102 @@
-# Player and build guide
+# Player guide
 
-This is an unreleased runtime prototype. Final compatibility and removal acceptance are in progress; see [release QA](RELEASE-QA.md). The current pool covers four ordinary level-15 Grasslands camps, not the whole world.
+## What you need
 
-## Runtime requirements
-
-The tested native module uses UE4SS 3.0.1 Beta #0, commit `c0a8d4cb259dccb8d7b58aec8b89e51c97222f9b`. Its C++ ABI must match the loader. A newer UE4SS build is not automatically compatible. The reviewed game table must pass the full runtime fingerprint check; unknown tables disable substitution.
-
-The public Rebirth loader is [RE-UE4SS FF7R](https://www.nexusmods.com/finalfantasy7rebirth/mods/267?tab=files). It offers several game-version variants. The exact correspondence between these downloads and our tested local loader remains to be verified before release. Do not assume that an arbitrary variant is compatible. We do not redistribute the loader.
+- FINAL FANTASY VII REBIRTH on PC (Steam).
+- [RE-UE4SS for FF7 Rebirth](https://www.nexusmods.com/finalfantasy7rebirth/mods/267) version 1.0.2, installed so
+  that `End\Binaries\Win64\ue4ss\UE4SS.dll` exists. The mod includes a small native part (`dlls\main.dll`) that has to
+  match the loader exactly, so it checks the loader's fingerprint when the game starts. On any other build it writes an
+  `inactive` line to `UE4SS.log` and does nothing.
 
 ## Install
 
-Close the game. Back up existing UE4SS configuration and any existing `BiomeRandomizerRuntime` folder. Retain normal save backups. The mod belongs beneath `End/Binaries/Win64/ue4ss/Mods/`:
+1. Close the game.
+2. Extract the release zip into the game's folder, the one with `ff7rebirth.exe` in it. You should end up with:
 
-```text
-BiomeRandomizerRuntime/
-  dlls/main.dll
-  Scripts/main.lua
-  Scripts/automatic.lua
-  Scripts/lifecycle.lua
-  Scripts/state_store.lua
-  Scripts/biome_json.lua
-  Scripts/config.lua
-```
+   ```text
+   End\Binaries\Win64\ue4ss\Mods\BiomeRandomizerRuntime\
+     enabled.txt
+     dlls\main.dll
+     Scripts\main.lua, automatic.lua, lifecycle.lua, state_store.lua, biome_json.lua, world_pools.lua, config.lua
+   ```
 
-Enable `BiomeRandomizerRuntime : 1` once in the existing `mods.txt`, preserving other entries. Compare installed hashes with the release manifest. No game assets, developer harness, request files or modified saves are required.
+3. Start the game. `enabled.txt` turns the mod on, so you don't need to edit `mods.txt`.
 
-Move our earlier `BiomeRandomizer_P.pak`, `.ucas` and `.utoc` triplet out of the active Paks directory to a verified backup first. That fixed-composition experiment conflicts with the runtime's original-table check. Never mix it with the runtime package.
+To check it's running, open `ue4ss\UE4SS.log` and look for `[BiomeRandomizerRuntime]` lines with `selector_ready`
+and `table_ready`.
 
-## Seed and respawns
+## What to expect
 
-The default `Scripts/config.lua` is:
+The first time you load a save with the mod installed, each eligible camp gets its first roll, so camps that haven't
+spawned yet will already be different. After that, a camp changes each time you fight it and it respawns. The game's own
+timer and streaming decide when that happens: you normally need to leave the area for a few minutes.
+
+- A camp counts as fought when its enemies join a battle that doesn't end in a Game Over. Winning, running away and
+  leaving the fight all count. A Game Over leaves the counter alone, so a retry meets the same enemies.
+- Each slot in a camp picks its enemy from the enemies the region's camps use. The camp's total number of enemies is
+  picked between the smallest and largest camp in that region, so a camp of one can become a camp of four, and back.
+- The new roll is never the same as the last one.
+- When a region's Combat Assignment (Chadley's Fiend Intel) has been won, its fiend joins that region's pool. The mod
+  reads the save's record when it loads, so assignments won before you installed it count too. Only assignments whose
+  fiend is a single named enemy qualify: 31 across the seven regions.
+- Levels stay with the camp: a swapped-in enemy gets the level the camp's own enemies had.
+
+What isn't changed: story battles, side-quest fights, the Combat Assignments themselves, bosses, hunts, Chadley's
+simulator, Queen's Blood, Colosseum fights, minigames, towns, dungeons and interiors.
+
+## Seeds
+
+`Scripts\config.lua` holds the settings:
 
 ```lua
-return { enabled=true, seed='auto' }
+return {
+    enabled=true,
+    seed='auto',
+}
 ```
 
-`auto` creates a random seed once and reuses it. To reproduce a sequence, set a chosen nonempty string, for example `'13'`, while the game is closed. A different explicit seed starts a new sequence. `'13'` and `'013'` differ. There is no in-game settings menu.
+- `seed='auto'` makes a random seed the first time and keeps it.
+- Any other text, for example `seed='cloud'`, gives a sequence that anyone with the same seed and the same fights will
+  see too. Change it while the game is closed. A new seed starts every camp from scratch.
+- `enabled=false` switches the mod off and leaves the state file alone.
 
-State is separate from game saves: `%LOCALAPPDATA%/FFVIIRebirthBiomeRandomizer/state-v1.json`, with a previous-state backup. Preserve both when updating. Removing state deliberately resets the sequence; back it up first. Corrupt or incompatible state disables operation instead of silently resetting progress.
+The seed, each camp's counter and the unlocked assignment fiends are in
+`%LOCALAPPDATA%\FFVIIRebirthBiomeRandomizer\state-v1.json`. They belong to the install, not to a save slot, so loading an
+older save doesn't rewind them. Delete the folder to start again with a new random seed.
 
-The seed, camp ID and complete-clear counter select Kalm Fang/two Orcs or Mu/two Orcs. All three exact members must be verified dead and the party alive outside battle before a counter advances. The selection is ready for the game's next normal respawn. The original 180-second timer and normal streaming rules still apply. Revisit, load, defeat, retreat and unloading a living group do not advance a counter. The next random choice can repeat the current composition. State is global to this installation, not tied to one save slot.
+## Remove
 
-## Remove and diagnose
+Close the game and delete `Mods\BiomeRandomizerRuntime`. All the mod's changes are in memory, so the game is back to
+normal the next time it starts. Your saves were never changed. You can also delete
+`%LOCALAPPDATA%\FFVIIRebirthBiomeRandomizer`.
 
-Close the game, retain manifest/state backups, disable the single `BiomeRandomizerRuntime` entry and remove only its folder. Runtime changes vanish with the process. Keep UE4SS and other mods installed. The optional state folder can remain for reuse. Native removal acceptance is recorded separately in the QA report.
+## Known issues
 
-Search `UE4SS.log` for `[BiomeRandomizerRuntime]`. `selector_ready`, `reference_ready`, `group_acquired`, `clear_committed` and `spawn_observed` describe different stages: a table write does not prove a spawn. `automatic_disabled` or `automatic stopped` means substitution has stopped. Preserve the log, version, seed and manifest with a bug report.
+- **Unlocks belong to the install, not the save.** The mod reads each save's won assignments when it loads, including
+  ones won before you installed the mod. Once a fiend is unlocked it stays unlocked, even if you load an older save that
+  hadn't won that assignment yet. Delete the state folder to reset.
+- **Loading takes a little longer.** The mod checks and sets up the camp tables when a save loads or you fast travel,
+  up to about half a second. We matched it against recorded frames: it all happens while the loading screen is up. Walking
+  around afterwards costs nothing noticeable.
+- **Odd-looking camps.** Any size of enemy can turn up in any camp of its region, so a big enemy can end up in a tight
+  spot. In our tests they spawned and fought normally.
+- **Other mods that change the camp tables** (`EnemyTerritory` in any region) clash with this one. The mod checks each
+  table's fingerprint and leaves a table it doesn't recognise alone, so it fails safe rather than mixing.
+- **The game sometimes shows a fatal error when you quit.** We checked: with this mod alone the game exits cleanly.
+  Other tools that hook the game can cause it, so if you see it, try without them first.
 
-Another mod editing regional EnemyTerritory data or its references is incompatible. The fingerprint does not validate other mods' enemy-stat, AI, movement, arena or reward changes. See [compatibility](COMPATIBILITY.md). Equal counts and levels do not establish equal difficulty.
+## Problems
+
+Look in `ue4ss\UE4SS.log` for `[BiomeRandomizerRuntime]`:
+
+- `inactive` with a reason: the loader or a camp table isn't the one the mod was tested with, and it's done nothing.
+- `automatic_disabled`: something unexpected happened, so it stopped changing camps for this session. Camps it had
+  already changed keep their enemies until you restart the game. Please report it with the log and your state file.
+- `fight_observed`, `cycle_committed`: a fight was seen and a camp moved on.
+- `assignment_unlocked`: an assignment fiend joined its region's pool.
+
+Bug reports are welcome on the GitHub repository's Issues page.
 
 ## Build from source
 
-Runtime source is in `runtime/Native` and `runtime/Scripts`. [The pinned build recipe](../runtime/BUILDING.md) records exact SDK commits, authenticated UEPseudo access, import-library generation from the tested loader and parameterized build commands. The repaired source compiled through that recipe with a newly generated import library. It never installs files or starts the game. Exact public-loader download correspondence remains a separate release prerequisite.
-
-Run the Python tests in `runtime/tests` with Lua 5.4 and the compiled `RuntimeArgumentTests` executable. Synthetic results do not pass native acceptance cases.
-
-## Legacy fixed-package research
-
-The earlier package builder selects compositions at build time and does not implement reroll-on-respawn. Its seed algorithm differs from the runtime. It remains available for controlled comparisons.
-
-It requires the game's raw FModel exports at the four paths in `data/pools.json`, Python 3.10+, .NET 8, UnrealReZen, the owner's Oodle library and the game's IoStore files. Proprietary inputs are excluded from source/releases. Copy `tools/build-config.example.json` to ignored `tools/build-config.local.json` and configure local paths. From the repository root:
-
-```powershell
-python tools/build.py --config tools/build-config.local.json --seed 44
-python tools/build.py --config tools/build-config.local.json --seed 44 --execute --pack
-```
-
-The first command creates a read-only plan/audit. The second writes and independently verifies a package. Only the complete triplet in the audited `package_directory` is installable. Keep intermediate outputs for diagnosis. `--only Grassland_mob_05` restricts the experiment to that allowlisted camp. Never install this research package alongside the runtime.
+See [runtime/BUILDING.md](../runtime/BUILDING.md).
