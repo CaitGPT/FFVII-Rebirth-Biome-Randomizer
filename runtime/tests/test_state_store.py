@@ -55,8 +55,7 @@ class Store(unittest.TestCase):
             disk='{broken';assert(not pcall(function() Store.new(options()) end));assert(writes==0)
             disk='';Store.new(options('s'));local good=json.decode(disk)
             for _,mutate in ipairs({function(d) d.version=99 end,function(d) d.scope='different' end,
-                function(d) d.cycles.camp05.cycle=-1 end,function(d) d.cycles.quest={cycle=0} end,
-                function(d) d.cycles.camp23=nil end}) do
+                function(d) d.cycles.camp05.cycle=-1 end,function(d) d.cycles.camp23='x' end}) do
                 local d=json.decode(json.encode(good));mutate(d);disk=json.encode(d)
                 local before=writes;assert(not pcall(function() Store.new(options('s')) end));assert(writes==before)
             end
@@ -66,6 +65,12 @@ class Store(unittest.TestCase):
         self.run_case('''
             local a=Store.new(options('first'));local first=a.seed
             local b=Store.new(options('second'));assert(b.seed=='second' and b.cycles.camp05.cycle==0 and writes==2)
+        ''')
+
+    def test_camps_added_by_a_later_version_start_at_zero(self):
+        self.run_case('''
+            Store.new(options('s'));local d=json.decode(disk);d.cycles.camp23=nil;d.cycles.older={cycle=4};disk=json.encode(d)
+            local b=Store.new(options('s'));assert(b.cycles.camp23.cycle==0 and b.cycles.older.cycle==4)
         ''')
 
     def test_save_cannot_advance_an_unselected_camp(self):

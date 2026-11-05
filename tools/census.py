@@ -79,7 +79,7 @@ for p in ROOT.rglob("*.csv"):
     for m in set(pattern.findall(text)):
         refs[m].add(str(p.relative_to(ROOT).with_suffix("")).replace("\\", "/"))
 
-fields = ["region", "territory", "kind", "type", "respawn", "templates", "pop_min", "pop_max", "levels", "battles", "sizes", "moves",
+fields = ["region", "territory", "kind", "type", "respawn", "templates", "pop_min", "pop_max", "levels", "battles", "sizes", "moves", "hp",
           "waves", "external", "blueprint", "force_finish", "rare", "refs"]
 with OUT.open("w", newline="", encoding="utf-8") as f:
     w = csv.DictWriter(f, fields); w.writeheader()
@@ -100,8 +100,9 @@ with OUT.open("w", newline="", encoding="utf-8") as f:
                         "levels": "|".join(clean(r.get("MobLevelList_Array", []))),
                         "battles": "|".join((s or {}).get("battle", "?") for s in specs),
                         "sizes": "|".join((s or {}).get("size", "?") for s in specs), "moves": "|".join((s or {}).get("move", "?") for s in specs),
+                        "hp": "|".join(str((s or {}).get("hp", "?")) for s in specs),
                         "waves": len(clean(r.get("WaveMobTemplateList_Array", []))), "external": len(clean(r.get("ExternalEnemiesList_Array", []))),
                         "blueprint": r.get("BattleSceneBluePrint", "").strip(), "force_finish": len(clean(r.get("ForceFinishBattleOnKill_Array", []))),
                         "rare": int(any("rare" in t.lower() for t in templates)),
-                        "refs": ";".join(sorted(refs.get(name, ())))[:300]})
+                        "refs": ";".join(sorted(refs.get(name, ())))})
 print("wrote", OUT)

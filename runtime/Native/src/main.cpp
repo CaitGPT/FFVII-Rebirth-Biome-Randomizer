@@ -21,6 +21,9 @@
 #include "reviewed_layout.hpp"
 #include "write_arguments.hpp"
 #include "persistent_dispatch.hpp"
+#include "spawn_points.hpp"
+#include <unordered_map>
+#include <unordered_set>
 
 namespace {
 std::string hex(const unsigned char* data, std::size_t size);
@@ -44,10 +47,10 @@ std::string digest(const std::vector<unsigned char>& bytes) {
 struct Table {
     std::uintptr_t content{};
     std::vector<unsigned char> bytes;
-    std::array<int,4> choices{};
+    std::vector<int> choices;
 };
-std::uint64_t encoded(std::uint32_t descriptor,int choice) {
-    const auto relative=static_cast<std::int64_t>(reviewed::options[choice])-descriptor;
+std::uint64_t encoded(std::uint32_t descriptor,std::uint32_t option) {
+    const auto relative=static_cast<std::int64_t>(option)-descriptor;
     return static_cast<std::uint64_t>(relative*2)|1;
 }
 DWORD window_thread() {
@@ -64,7 +67,9 @@ DWORD window_thread() {
     return search.thread;
 }
 bool uncertain_write{};
-Table validate(std::uintptr_t address) {
+Table validate(std::uintptr_t address,std::size_t table_index) {
+    if(table_index>=reviewed::table_count) throw std::runtime_error("unknown_table");
+    const auto& reviewed_table=reviewed::tables[table_index];
     // ExecuteInGameThread in this UE4SS version drains on ProcessEvent, which
     // may also occur on a loading thread. Never bind to its first invocation.
     // Require this Windows game's own visible UnrealWindow owner thread.
@@ -74,24 +79,27 @@ Table validate(std::uintptr_t address) {
     std::array<unsigned char,0x40> header{};
     if(!read(address,header.data(),header.size())) throw std::runtime_error("unreadable_asset");
     auto* object=reinterpret_cast<RC::Unreal::UObject*>(address);
-    if(object->GetFullName()!=L"EndDataObjectEnemyTerritory /Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory")
+    if(object->GetFullName()!=std::wstring(L"EndDataObjectEnemyTerritory ")+reviewed_table.asset)
         throw std::runtime_error("unreviewed_asset_identity");
     Table table;
     // Observed live in the pinned c0a8d4c/game build, then checked by the entire
     // frozen image's structural fingerprint and every serialized name below.
     std::memcpy(&table.content,header.data()+0x38,8);
-    table.bytes.resize(reviewed::image_bytes);
+    table.bytes.resize(reviewed_table.image_bytes);
+    table.choices.resize(reviewed_table.target_count);
     if(!read(table.content,table.bytes.data(),table.bytes.size())) throw std::runtime_error("unreadable_image");
     auto normalized=table.bytes;
-    for(std::size_t i=0;i<4;++i) {
-        const auto descriptor=reviewed::targets[i].descriptor;
-        std::uint64_t value{};std::memcpy(&value,table.bytes.data()+descriptor,8);
-        int choice=value==encoded(descriptor,0)?0:value==encoded(descriptor,1)?1:-1;
+    for(std::size_t i=0;i<reviewed_table.target_count;++i) {
+        const auto& target=reviewed_table.targets[i];
+        std::uint64_t value{};std::memcpy(&value,table.bytes.data()+target.descriptor,8);
+        int choice=-1;
+        for(std::uint32_t k=0;k<target.option_count;++k) if(value==encoded(target.descriptor,target.options[k])) {choice=static_cast<int>(k);break;}
         if(choice<0) throw std::runtime_error("unreviewed_composition_pointer");
         table.choices[i]=choice;
-        value=encoded(descriptor,0);std::memcpy(normalized.data()+descriptor,&value,8);
+        value=encoded(target.descriptor,target.options[0]);std::memcpy(normalized.data()+target.descriptor,&value,8);
     }
-    for(const auto& patch:reviewed::names) {
+    for(std::size_t n=0;n<reviewed_table.name_count;++n) {
+        const auto& patch=reviewed_table.names[n];
         // Find only: no global name is created. Compare exact native token
         // components, avoiding unsafe ToString calls on untrusted indices.
         const RC::Unreal::FName expected(patch.name,RC::Unreal::FNAME_Find);
@@ -101,17 +109,21 @@ Table validate(std::uintptr_t address) {
         if(index!=expected.GetComparisonIndex() || number!=expected.GetNumber()) throw std::runtime_error("name_manifest_differs");
         std::memset(normalized.data()+patch.offset,0,8);
     }
-    if(digest(normalized)!=reviewed::masked_sha256) throw std::runtime_error("structure_fingerprint_differs");
+    if(digest(normalized)!=reviewed_table.masked_sha256) throw std::runtime_error("structure_fingerprint_differs");
     return table;
 }
 std::string status_json(const Table& table) {
     std::ostringstream out;out << "{\"ok\":true,\"image_bytes\":" << table.bytes.size() << ",\"asset_content\":" << table.content << ",\"choices\":[";
-    for(std::size_t i=0;i<4;++i) {if(i)out<<',';out<<table.choices[i];}
+    for(std::size_t i=0;i<table.choices.size();++i) {if(i)out<<',';out<<table.choices[i];}
     out << "],\"all_names_and_structural_fingerprint_verified\":true,\"uncertain_write\":" << (uncertain_write?"true":"false") << '}';
     return out.str();
 }
 int table_status(const RC::LuaMadeSimple::Lua& lua) {
-    try {lua.set_string(status_json(validate(static_cast<std::uintptr_t>(lua.get_integer(1)))));}
+    try {
+        const auto address=static_cast<std::uintptr_t>(lua.get_integer(1));
+        const auto table=static_cast<std::size_t>(lua.get_integer(1));
+        lua.set_string(status_json(validate(address,table)));
+    }
     catch(const std::exception& error) {lua.set_string(std::string("{\"ok\":false,\"reason\":\"")+error.what()+"\"}");}
     return 1;
 }
@@ -216,26 +228,32 @@ int is_game_thread(const RC::LuaMadeSimple::Lua& lua) {
 }
 int set_next(const RC::LuaMadeSimple::Lua& lua) {
     try {
-        const auto [address,target,expected,desired]=consume_write_arguments(lua);
+        const auto arguments=consume_write_arguments(lua);
+        const auto address=arguments.address;const auto table_index=static_cast<std::size_t>(arguments.table);
+        const auto target=static_cast<std::size_t>(arguments.target);const auto expected=arguments.expected;const auto desired=arguments.desired;
         if(uncertain_write) throw std::runtime_error("uncertain_write_latched");
-        const auto before=validate(address);
+        const auto before=validate(address,table_index);
+        const auto& reviewed_table=reviewed::tables[table_index];
+        if(target>=reviewed_table.target_count) throw std::runtime_error("invalid_selection");
+        const auto& reviewed_target=reviewed_table.targets[target];
+        if(expected>=reviewed_target.option_count || desired>=reviewed_target.option_count) throw std::runtime_error("invalid_selection");
         if(before.choices[target]!=expected) throw std::runtime_error("stale_expected_selection");
         if(expected==desired) {lua.set_string(status_json(before));return 1;}
-        const auto offset=reviewed::targets[target].descriptor;
+        const auto offset=reviewed_target.descriptor;
         const auto pointer=before.content+offset;
         MEMORY_BASIC_INFORMATION region{};
         if(!VirtualQuery(reinterpret_cast<void*>(pointer),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
            !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
            pointer+8>reinterpret_cast<std::uintptr_t>(region.BaseAddress)+region.RegionSize)
             throw std::runtime_error("destination_not_writable_data");
-        auto wanted=before.bytes;const auto value=encoded(offset,static_cast<int>(desired));
+        auto wanted=before.bytes;const auto value=encoded(offset,reviewed_target.options[desired]);
         std::memcpy(wanted.data()+offset,&value,8);
         // This changes this row's relative pointer, never the shared vector.
         // Keep the latch set unless exact full-image readback succeeds.
         uncertain_write=true;SIZE_T written{};
         if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(pointer),&value,8,&written) || written!=8)
             throw std::runtime_error("write_uncertain");
-        const auto after=validate(address);
+        const auto after=validate(address,table_index);
         if(after.content!=before.content || after.bytes!=wanted || after.choices[target]!=desired)
             throw std::runtime_error("write_readback_differs");
         uncertain_write=false;lua.set_string(status_json(after));
@@ -249,35 +267,50 @@ std::string hex(const unsigned char* data, std::size_t size) {
     for (std::size_t i=0;i<size;++i) out << std::hex << std::setw(2) << std::setfill('0') << unsigned(data[i]);
     return out.str();
 }
-int inspect(const RC::LuaMadeSimple::Lua& lua) {
-    // Read-only discovery. No arbitrary memory writes or engine calls.
-    // The Lua caller supplies only the freshly resolved, exact regional asset.
-    const auto address=static_cast<std::uintptr_t>(lua.get_integer());
-    std::array<unsigned char,256> bytes{};
-    if (!read(address,bytes.data(),bytes.size())) { lua.set_string("{\"ok\":false,\"reason\":\"unreadable_asset\"}"); return 1; }
-    auto* object=reinterpret_cast<RC::Unreal::UObject*>(address);
-    const auto name=object->GetFullName();
-    if (name != L"EndDataObjectEnemyTerritory /Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory") {
-        lua.set_string("{\"ok\":false,\"reason\":\"unreviewed_asset_identity\"}"); return 1;
-    }
-    std::ostringstream out;
-    out << "{\"ok\":true,\"read_only\":true,\"asset_address\":" << address
-        << ",\"asset_hex\":\"" << hex(bytes.data(),bytes.size()) << "\",\"pointer_candidates\":[";
-    bool first=true;
-    for (std::size_t offset=0x28;offset+8<=bytes.size();offset+=8) {
-        std::uintptr_t pointer{};std::memcpy(&pointer,bytes.data()+offset,8);
-        if (pointer%8!=0) continue;
-        std::array<unsigned char,1024> target{};
-        if (!read(pointer,target.data(),target.size())) continue;
-        if (!first) out << ',';first=false;
-        out << "{\"asset_offset\":" << offset << ",\"address\":" << pointer
-            << ",\"hex\":\"" << hex(target.data(),target.size()) << "\"}";
-    }
-    out << "]}";
-    lua.set_string(out.str());return 1;
+// Spawn lists: which camps may be changed, and which of them are filled in this level.
+std::unordered_map<std::wstring,RC::Unreal::UObject*> spawn_ready;
+std::unordered_set<std::wstring> spawn_camps;
+unsigned long long spawn_seen{},spawn_filled{},spawn_refused{};
+std::wstring camp_of(const std::wstring& full) {
+    const auto at=full.rfind(L'.');
+    return at==std::wstring::npos?std::wstring{}:full.substr(at+1);
+}
+void prepare_spawn_actor(RC::Unreal::UObject* actor,const std::wstring& full) {
+    if(spawn_camps.empty())
+        for(const auto& table:reviewed::tables)
+            for(std::size_t i=0;i<table.target_count;++i) spawn_camps.insert(table.targets[i].id);
+    ++spawn_seen;
+    const auto camp=camp_of(full);
+    if(!spawn_camps.contains(camp)) return;
+    const auto found=spawn_ready.find(camp);
+    if(found!=spawn_ready.end() && found->second==actor) return;
+    const int filled=spawn::fill(actor);
+    if(filled<0) {++spawn_refused;return;}
+    spawn_filled+=static_cast<unsigned long long>(filled);
+    spawn_ready[camp]=actor;
+}
+int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
+    if(!lua.is_string(1)) {lua.set_bool(false);return 1;}
+    const std::string camp(lua.get_string(1));
+    lua.set_bool(spawn_ready.contains(std::wstring(camp.begin(),camp.end())));
+    return 1;
+}
+int spawn_prepare(const RC::LuaMadeSimple::Lua& lua) {
+    // Called with one exact actor from a one-off scan, when BeginPlay wasn't seen for it.
+    try {
+        auto* object=reinterpret_cast<RC::Unreal::UObject*>(static_cast<std::uintptr_t>(lua.get_integer(1)));
+        const auto full=object->GetFullName();
+        if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) prepare_spawn_actor(object,full);
+    } catch(...) {++spawn_refused;}
+    return 0;
+}
+int spawn_reset(const RC::LuaMadeSimple::Lua&) {spawn_ready.clear();return 0;}
+int spawn_stats(const RC::LuaMadeSimple::Lua& lua) {
+    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+"}");
+    return 1;
 }
 class Runtime : public RC::CppUserModBase {
-    PersistentDispatch dispatch{window_thread};
+    PersistentDispatch dispatch{window_thread,prepare_spawn_actor};
 public:
     Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.0");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
     void on_unreal_init() override { dispatch.install(); }
@@ -290,7 +323,10 @@ public:
                       RC::LuaMadeSimple::Lua& async, std::vector<RC::LuaMadeSimple::Lua*>& hooks) override {
         if (name!=STR("BiomeRandomizerRuntime")) return;
         const auto add=[](RC::LuaMadeSimple::Lua& state) {
-            state.register_function("BiomeRandomizerInspectAsset",inspect);
+            state.register_function("BiomeRandomizerSpawnReady",spawn_is_ready);
+            state.register_function("BiomeRandomizerSpawnPrepare",spawn_prepare);
+            state.register_function("BiomeRandomizerSpawnReset",spawn_reset);
+            state.register_function("BiomeRandomizerSpawnStats",spawn_stats);
             state.register_function("BiomeRandomizerTableStatus",table_status);
             state.register_function("BiomeRandomizerSetNext",set_next);
             state.register_function("BiomeRandomizerSHA256",hash_text);

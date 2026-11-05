@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 // Exported by the tested c0a8d4c loader; absent from the older template header.
 namespace RC::Unreal {
@@ -49,6 +50,7 @@ class PersistentDispatch {
         using NameGetter=const RC::Unreal::FName& (*)(const RC::Unreal::UObject*);
         NameGetter name{};
         DWORD (*window_thread)(){};
+        void (*spawn_actor)(RC::Unreal::UObject*,const std::wstring&){};
     };
     std::shared_ptr<State> state=std::make_shared<State>();
     static void log(std::string message) noexcept {
@@ -90,9 +92,19 @@ class PersistentDispatch {
             const auto name=shared->name(reinterpret_cast<RC::Unreal::UObject*>(function));
             if(name==shared->begin && actor) {
                 const auto full=actor->GetFullName();
-                if(full.find(L" /Game/Level/Game/Field/1200-GRASA/")!=std::wstring::npos &&
-                   full.starts_with(L"EndFieldEnemyTerritoryActor "))
-                    lua->call_function("BiomeRandomizerTerritoryBegin",0,0);
+                if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) {
+                    if(shared->spawn_actor) shared->spawn_actor(actor,full);
+                } else if(full.starts_with(L"EndFieldEnemyTerritoryActor ")) {
+                    constexpr std::wstring_view marker=L"/Game/Level/Game/Field/";
+                    const auto at=full.find(marker);
+                    if(at!=std::wstring::npos) {
+                        const auto start=at+marker.size();const auto end=full.find(L'/',start);
+                        if(end!=std::wstring::npos) {
+                            const auto region=ascii(std::wstring_view(full).substr(start,end-start));
+                            lua->prepare_function_call("BiomeRandomizerTerritoryBegin");lua->set_string(region);lua->call_function(1,0);
+                        }
+                    }
+                }
             }
             if(Clock::now()>=shared->next) {
                 const auto started=Clock::now();
@@ -132,7 +144,7 @@ class PersistentDispatch {
         shared->dispatching=false;
     }
 public:
-    explicit PersistentDispatch(DWORD (*thread)()){state->window_thread=thread;}
+    explicit PersistentDispatch(DWORD (*thread)(),void (*spawn_actor)(RC::Unreal::UObject*,const std::wstring&)){state->window_thread=thread;state->spawn_actor=spawn_actor;}
     void install() {
         state->name=reinterpret_cast<State::NameGetter>(GetProcAddress(GetModuleHandleW(L"UE4SS.dll"),
             "?GetNamePrivate@UObjectBase@Unreal@RC@@QEBAAEBVFName@23@XZ"));

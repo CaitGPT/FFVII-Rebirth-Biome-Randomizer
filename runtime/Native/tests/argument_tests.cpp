@@ -21,20 +21,20 @@ int main() {
         for(std::int64_t target=0;target<4;++target)
             for(std::int64_t expected=0;expected<2;++expected)
                 for(std::int64_t desired=0;desired<2;++desired) {
-                    Stack stack{{std::int64_t{0x7ff123456780},target,expected,desired}};
+                    Stack stack{{std::int64_t{0x7ff123456780},std::int64_t{6},target,expected,desired}};
                     const auto value=consume_write_arguments(stack);
-                    if(value.address!=0x7ff123456780 || value.target!=target || value.expected!=expected || value.desired!=desired || !stack.values.empty())
+                    if(value.address!=0x7ff123456780 || value.table!=6 || value.target!=target || value.expected!=expected || value.desired!=desired || !stack.values.empty())
                         throw std::runtime_error("arguments shifted or lost");
                 }
         for(const auto& values:std::vector<std::vector<std::variant<std::int64_t,std::string>>>{
-            {std::int64_t{123},std::int64_t{0},std::int64_t{0}},
-            {std::int64_t{123},std::int64_t{0},std::string{"1"},std::int64_t{0}}}) {
+            {std::int64_t{123},std::int64_t{0},std::int64_t{0},std::int64_t{0}},
+            {std::int64_t{123},std::int64_t{0},std::int64_t{0},std::string{"1"},std::int64_t{0}}}) {
             Stack stack{values};bool refused=false;
             try {consume_write_arguments(stack);}catch(const std::runtime_error& e){refused=std::string(e.what())=="invalid_argument_types";}
             if(!refused || stack.values!=values) throw std::runtime_error("bad types were consumed or accepted");
         }
-        for(const auto target:std::vector<std::int64_t>{-1,4,100}) {
-            Stack stack{{std::int64_t{123},target,std::int64_t{0},std::int64_t{1}}};bool refused=false;
+        for(const auto target:std::vector<std::int64_t>{-1,-4,-100}) {
+            Stack stack{{std::int64_t{123},std::int64_t{0},target,std::int64_t{0},std::int64_t{1}}};bool refused=false;
             try {consume_write_arguments(stack);}catch(const std::runtime_error& e){refused=std::string(e.what())=="invalid_selection";}
             if(!refused) throw std::runtime_error("unowned target accepted");
         }

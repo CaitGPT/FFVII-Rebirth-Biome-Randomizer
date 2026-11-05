@@ -17,9 +17,10 @@ function M.new(options)
         assert(type(document.seed)=='string' and #document.seed>0 and #document.seed<=128 and not document.seed:find('[%z\1-\31]'),'state_seed_invalid')
         assert(type(document.cycles)=='table','state_cycles_invalid')
         for camp,value in pairs(document.cycles) do
-            assert(options.pools[camp] and type(value)=='table' and integer(value.cycle),'state_cycle_invalid')
+            assert(type(value)=='table' and integer(value.cycle),'state_cycle_invalid')
         end
-        for camp in pairs(options.pools) do assert(document.cycles[camp],'state_cycle_missing') end
+        -- A later version may add camps, and one that drops a camp keeps its counter.
+        for camp in pairs(options.pools) do document.cycles[camp]=document.cycles[camp] or {cycle=0} end
     end
     local fresh=not document or (options.seed~='auto' and options.seed~=document.seed)
     if fresh then
