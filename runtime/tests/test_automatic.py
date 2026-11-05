@@ -7,6 +7,8 @@ from lupa.lua54 import LuaRuntime
 ROOT=Path(__file__).parents[1]/'Scripts'
 
 SETUP=r'''
+local clock=0;os.clock=function() clock=clock+10;return clock end
+player_at={X=131878,Y=-71156,Z=4000}
 function object(value)
     value=value or {};value.IsValid=function() return true end;return value
 end
@@ -14,6 +16,8 @@ function FName(s) return {ToString=function() return s end} end
 function actor(name,spec,id)
     return object({name=name,spec=spec,id=id,hp=100,max=100,state=1,
         GetFullName=function(self) return self.id end,
+        GetAddress=function(self) return self.id end,
+        K2_GetActorLocation=function() return player_at end,
         GetClass=function() return {GetFName=function() return FName('PC0000_00_Cloud_Standard_C') end} end})
 end
 cloud=actor('Cloud','player','PC /Game/Level/Game/EndGame.EndGame:PersistentLevel.Cloud1')
@@ -22,6 +26,7 @@ aerith=actor('Aerith','player','PC /Game/Level/Game/EndGame.EndGame:PersistentLe
 party_members={cloud,tifa,aerith};map={};battle_active=false;logs={};native_writes={};disk='';choices={0,0,0,0}
 local battle=object({
  GetCharaFromActorName=function(_,name,allow_manager)
+     lookups=(lookups or 0)+1
      if allow_manager then return map[name:ToString()] end
  end,
  GetActorName=function(_,a) return FName(a.name) end,
@@ -34,6 +39,7 @@ local viewport=object();local engine=object({GameViewport=viewport,GetFullName=f
 local statics=object({GetPlayerPawn=function() return cloud end})
 local asset=object({GetAddress=function() return 123456 end,GetFullName=function() return 'EndDataObjectEnemyTerritory /Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory' end})
 function StaticFindObject(path)
+    finds=(finds or 0)+1
     if path=='/Engine/Transient.GameEngine_1' then return engine end
     if path=='/Script/Engine.Default__GameplayStatics' then return statics end
     if path=='/Script/EndGame.Default__EndBattleAPI' then return battle end
@@ -187,6 +193,32 @@ class Adapter(unittest.TestCase):
             auto=Automatic.new({enabled=true,seed='13'});auto:territory_begin()
             assert(not auto.fault and #native_writes==4)
             for _,choice in ipairs(choices) do assert(choice==1) end
+        ''')
+
+    def test_far_from_every_camp_touches_almost_nothing(self):
+        # Path lookups stalled the game thread by 60 ms a tick before this pacing.
+        self.run_case('''
+            auto:step();player_at={X=0,Y=0,Z=0};auto:step()
+            finds=0;lookups=0
+            for i=1,100 do auto:step() end
+            assert(finds==0 and lookups==0,'far ticks looked things up')
+            assert(not auto.fault)
+        ''')
+
+    def test_near_a_camp_looks_up_only_that_camp_and_never_refinds_apis(self):
+        self.run_case('''
+            player_at={X=171443,Y=-71068,Z=5700}
+            auto:step();finds=0;lookups=0
+            auto:step()
+            assert(lookups==4,'expected four names at one camp, got '..lookups)
+            assert(finds==0,'cached objects were looked up again')
+        ''')
+
+    def test_returning_after_a_load_checks_the_table_again(self):
+        self.run_case('''
+            auto:step();finds=0
+            auto.pawn_address=nil;auto.asset_object=nil;auto.prepared=false
+            auto:step();assert(finds>=1 and auto.prepared and not auto.fault)
         ''')
 
 if __name__=='__main__':unittest.main()

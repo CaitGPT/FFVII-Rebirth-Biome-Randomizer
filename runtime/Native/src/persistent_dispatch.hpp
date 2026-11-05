@@ -35,6 +35,13 @@ class PersistentDispatch {
         unsigned long long calls{};
         double max_ms{};
         double total_ms{};
+#ifdef BIOME_DIAG
+        // Diagnostic builds only: gaps between ProcessEvent calls on the game
+        // thread approximate frame stalls, with the selector on or off.
+        Clock::time_point last_event{};
+        unsigned long long gaps50{},gaps100{},gaps250{},over5{},over16{};
+        double max_gap{};
+#endif
         Clock::time_point next{},refresh{};
         RC::Unreal::FName begin,end;
         // The installed SDK spells FName as class; the historical headers
@@ -60,6 +67,19 @@ class PersistentDispatch {
     }
     static void dispatch(const std::shared_ptr<State>& shared,RC::Unreal::UObject* actor,
                          RC::Unreal::UFunction* function,void* parameters) {
+#ifdef BIOME_DIAG
+        if(shared->thread && GetCurrentThreadId()==shared->thread) {
+            const auto at=Clock::now();
+            if(shared->last_event!=Clock::time_point{}) {
+                const auto gap=std::chrono::duration<double,std::milli>(at-shared->last_event).count();
+                if(gap>shared->max_gap) shared->max_gap=gap;
+                if(gap>50) ++shared->gaps50;
+                if(gap>100) ++shared->gaps100;
+                if(gap>250) ++shared->gaps250;
+            }
+            shared->last_event=at;
+        }
+#endif
         std::unique_lock guard(shared->mutex,std::try_to_lock);
         if(!guard || !shared->alive || shared->fault || shared->dispatching ||
            !shared->current || !shared->thread || GetCurrentThreadId()!=shared->thread) return;
@@ -90,6 +110,18 @@ class PersistentDispatch {
                 if(elapsed>shared->max_ms) shared->max_ms=elapsed;
                 shared->total_ms+=elapsed;
                 ++shared->calls;
+#ifdef BIOME_DIAG
+                if(elapsed>5) ++shared->over5;
+                if(elapsed>16) ++shared->over16;
+                if(shared->calls%100==0) {
+                    log("diag ticks="+std::to_string(shared->calls)+" tick_avg_ms="+std::to_string(shared->total_ms/100)+
+                        " tick_max_ms="+std::to_string(shared->max_ms)+" ticks_over5="+std::to_string(shared->over5)+
+                        " ticks_over16="+std::to_string(shared->over16)+" gaps50="+std::to_string(shared->gaps50)+
+                        " gaps100="+std::to_string(shared->gaps100)+" gaps250="+std::to_string(shared->gaps250)+
+                        " max_gap_ms="+std::to_string(shared->max_gap));
+                    shared->total_ms=0;shared->max_ms=0;shared->over5=shared->over16=shared->gaps50=shared->gaps100=shared->gaps250=0;shared->max_gap=0;
+                }
+#else
                 // One line every five minutes, so a bug report shows the cost.
                 if(shared->calls==1 || shared->calls%3000==0) {
                     const auto window=shared->calls==1?1ull:3000ull;
@@ -97,6 +129,7 @@ class PersistentDispatch {
                         " max_ms="+std::to_string(shared->max_ms));
                     shared->total_ms=0;shared->max_ms=0;
                 }
+#endif
                 shared->next=Clock::now()+std::chrono::milliseconds(100);
             }
         } catch(const std::exception& error) {

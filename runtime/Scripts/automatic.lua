@@ -9,6 +9,14 @@ local asset_full='EndDataObjectEnemyTerritory '..asset_path
 local first_names={'mobgrasa_KalmFang_000','mobgrasa_Mu_000'}
 local specs={'CharaSpec_EN2000_05_GuardHound_KalmFangEnd2','CharaSpec_EN2204_00_Mu_StandardEnd2'}
 local orc_spec='CharaSpec_EN2211_01_Ogre_OrcEnd2'
+-- Work is paced by distance, because object path lookups cost milliseconds on
+-- the game thread and this game is recorded for video. World positions of the
+-- four territories (cm), read from the live game's territory actors.
+local camp_positions={Grassland_mob_05={131878,-71156},Grassland_mob_23={171443,-71068},
+    Grassland_mob_29={120825,-58499},Grassland_mob_30={196655,-73926}}
+local near_cm,region_cm=20000,250000
+local far_seconds,near_seconds,battle_seconds=1,0.5,0.25
+local members_seconds,table_seconds,retry_seconds,territory_seconds=2,5,5,5
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -28,7 +36,7 @@ local function emit(event,fields)
     print('[BiomeRandomizerRuntime] '..json.encode(fields)..'\n')
 end
 function M.new(config)
-    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},engine_path=nil}
+    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},apis={},next_step=0,members_at=0,table_at=0,retry_at=0,territory_at=0,prepared=false}
     local function fail(reason)
         if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
     end
@@ -38,20 +46,34 @@ function M.new(config)
         local object=resolve(asset_path)
         if valid(object) and object:GetFullName()==asset_full then return object end
     end
+    -- Default objects and the engine live as long as the process, so they are
+    -- found once. Anything a level can unload is still looked up afresh.
+    local function api(name)
+        local object=self.apis[name]
+        if not valid(object) then object=cdo(name);self.apis[name]=object end
+        return object
+    end
     local function pawn()
-        local engine=self.engine_path and resolve(self.engine_path)
+        local engine=self.engine
         if not valid(engine) then
-            engine=FindFirstOf('GameEngine')
-            if valid(engine) then self.engine_path=engine:GetFullName():match('^[^ ]+ (.+)$') end
+            engine=FindFirstOf('GameEngine');self.engine=engine
+            if not valid(engine) then return nil end
         end
-        if not valid(engine) then return nil end
-        local viewport=engine.GameViewport;local statics=resolve('/Script/Engine.Default__GameplayStatics')
-        if not valid(viewport) or not valid(statics) then return nil end
+        local statics=self.statics
+        if not valid(statics) then
+            statics=resolve('/Script/Engine.Default__GameplayStatics');self.statics=statics
+            if not valid(statics) then return nil end
+        end
+        local viewport=engine.GameViewport
+        if not valid(viewport) then return nil end
         local actor=statics:GetPlayerPawn(viewport,0)
         if not valid(actor) then return nil end
+        local address=actor:GetAddress()
+        if address==self.pawn_address then return actor end
         local class=actor:GetClass():GetFName():ToString()
         if not class:match('^PC%d%d%d%d_') and not class:match('^VE%d%d%d%d_') then return nil end
         if not actor:GetFullName():find('/Game/Level/Game/EndGame.EndGame:',1,true) then return nil end
+        self.pawn_address=address;self.members_at=0
         return actor
     end
     local function table_status(object)
@@ -88,7 +110,7 @@ function M.new(config)
         -- Preflight every changed camp before writing any of them. Late
         -- initialization must not change a living group's next-stream choice,
         -- nor leave other camps changed after a later camp refuses startup.
-        local battle=cdo('EndBattleAPI');assert(valid(battle),'initial_battle_api_unavailable')
+        local battle=api('EndBattleAPI');assert(valid(battle),'initial_battle_api_unavailable')
         for index,camp in ipairs(ids) do
             local desired=self.policy.camps[camp].choice
             if status.choices[index]~=desired then
@@ -165,27 +187,68 @@ function M.new(config)
             emit('death_verified',{camp=camp,id=value.id,source=source})
         elseif value.hp>0 then self.policy:alive(camp,self.epoch,value.id,value.hp) end
     end
+    local function refresh_members(battle,party)
+        local epoch,alive=members(battle,party)
+        if not epoch then return false end
+        initialize()
+        self.alive=alive
+        if epoch~=self.epoch then
+            self.epoch=epoch;self.owned={};self.policy:reset_epoch(epoch)
+            emit('epoch_observed',{actor_count=party:GetBattleMemberCount()})
+        end
+        return true
+    end
     function self:step()
-        if self.fault or config.enabled~=true or type(BiomeRandomizerIsGameThread)~='function' or not BiomeRandomizerIsGameThread() then return end
+        if self.fault or config.enabled~=true then return end
+        local now=os.clock()
+        if now<self.next_step then return end
+        self.next_step=now+far_seconds
         local ok,error_value=pcall(function()
-            if not pawn() then return end
-            local object=asset();if not valid(object) then return end
-            local battle,party,field=cdo('EndBattleAPI'),cdo('EndPartyAPI'),cdo('EndFieldAPI')
-            if not valid(battle) or not valid(party) or not valid(field) then return end
-            local epoch,alive=members(battle,party);if not epoch then return end
-            initialize()
-            if epoch~=self.epoch then
-                self.epoch=epoch;self.owned={};self.policy:reset_epoch(epoch)
-                emit('epoch_observed',{actor_count=party:GetBattleMemberCount()})
+            local actor=pawn()
+            if not actor then
+                -- Loading, or a scene. Whatever was resolved may be gone after it.
+                self.asset_object=nil;self.prepared=false;self.pawn_address=nil
+                return
             end
-            local status=table_status(object);if not prepare_references(object,status) then return end
-            if alive==0 then
+            local location=actor:K2_GetActorLocation()
+            local near={};local in_region=false
+            for index,camp in ipairs(ids) do
+                local dx,dy=location.X-camp_positions[camp][1],location.Y-camp_positions[camp][2]
+                local distance=dx*dx+dy*dy
+                if distance<near_cm*near_cm then near[#near+1]=index end
+                if distance<region_cm*region_cm then in_region=true end
+            end
+            if #near==0 then
+                self.asset_object=nil
+                if self.prepared or not in_region or now<self.retry_at then return end
+                self.retry_at=now+retry_seconds
+            end
+            local object=self.asset_object;local fresh=false
+            if not object then
+                object=asset();if not valid(object) then return end
+                fresh=true
+            end
+            local battle,party,field=api('EndBattleAPI'),api('EndPartyAPI'),api('EndFieldAPI')
+            if not valid(battle) or not valid(party) or not valid(field) then return end
+            if self.alive==nil or now>=self.members_at then
+                if not refresh_members(battle,party) then return end
+                self.members_at=now+members_seconds
+            end
+            if fresh or now>=self.table_at then
+                local status=table_status(object);if not prepare_references(object,status) then return end
+                self.prepared=true;self.table_at=now+table_seconds
+            end
+            if #near==0 then return end
+            self.asset_object=object
+            if self.alive==0 then
                 for _,camp in ipairs(ids) do self.policy:cancel_group(camp,self.epoch) end
                 return
             end
             local in_battle=field:IsDuringBattle()
             if type(in_battle)~='boolean' then return end
-            for index,camp in ipairs(ids) do
+            self.next_step=now+(in_battle and battle_seconds or near_seconds)
+            for _,index in ipairs(near) do
+                local camp=ids[index]
                 local current={};local first_choice
                 for choice,base in ipairs(first_names) do
                     local value=row(battle,base..'@'..camp)
@@ -231,7 +294,9 @@ function M.new(config)
                     for id,owner in pairs(self.owned) do if owner.camp==camp and not current_ids[id] then self.owned[id]=nil end end
                 end
                 for _,value in ipairs(current) do death(camp,value,'poll') end
-                if not in_battle then
+                if not in_battle and next(state.deaths) then
+                    -- Party state is otherwise sampled slowly; never commit on an old one.
+                    if not refresh_members(battle,party) or self.alive==0 then return end
                     local proposal=self.policy:confirmed_clear(camp,self.epoch,'victory')
                     if proposal then
                         self.store:prepare(proposal)
@@ -248,23 +313,12 @@ function M.new(config)
     end
     function self:territory_begin()
         if self.fault or config.enabled~=true or not BiomeRandomizerIsGameThread() then return end
+        -- A level brings dozens of territory actors at once; one check covers them.
+        local now=os.clock()
+        if now<self.territory_at then return end
         local ok,error_value=pcall(function()
             local object=asset();if not valid(object) then return end
-            initialize();prepare_references(object,table_status(object))
-        end)
-        if not ok then fail(error_value) end
-    end
-    function self:begin_play(context)
-        if self.fault or config.enabled~=true or type(BiomeRandomizerIsGameThread)~='function' or not BiomeRandomizerIsGameThread() then return end
-        local ok,error_value=pcall(function()
-            local actor=context:get();if not valid(actor) then return end
-            local class=resolve('/Script/EndGame.EndFieldEnemyTerritoryActor')
-            if not valid(class) or not actor:IsA(class) then return end
-            if not actor:GetFullName():find('/Game/Level/Game/Field/1200-GRASA/',1,true) then return end
-            local id=actor.EnemyTerritoryID
-            if type(id)~='string' then id=text(id) end
-            if not pools[id] then return end
-            local object=asset();if not valid(object) then return end
+            self.territory_at=now+territory_seconds
             initialize();prepare_references(object,table_status(object))
         end)
         if not ok then fail(error_value) end
@@ -277,7 +331,7 @@ function M.new(config)
             local actor=context:get();if not valid(actor) then return end
             local id=actor:GetFullName();local owner=self.owned[id]
             if not owner then return end
-            local battle=cdo('EndBattleAPI');if not valid(battle) then return end
+            local battle=api('EndBattleAPI');if not valid(battle) then return end
             local value={id=id,hp=battle:GetCharaHP(actor),max_hp=battle:GetHPMax(actor),state=battle:GetCharacterStateType(actor)}
             if type(value.hp)=='number' and type(value.max_hp)=='number' then death(owner.camp,value,'end_play_destroyed') end
         end)
