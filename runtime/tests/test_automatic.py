@@ -31,12 +31,14 @@ local battle=object({
  end,
  GetActorName=function(_,a) return FName(a.name) end,
  GetCharaSpecName=function(_,a) return FName(a.spec) end,
+ IsInBattle=function() return battle_active end,
  GetCharaHP=function(_,a) return a.hp end,GetHPMax=function(_,a) return a.max end,
  GetCharacterStateType=function(_,a) return a.state end})
 local party=object({GetBattleMemberCount=function() return 3 end,GetBattleMember=function(_,i) return party_members[i+1] end})
-local field=object({IsDuringBattle=function() return battle_active end})
+local field=object({IsDuringBattle=function() return false end})
 local viewport=object();local engine=object({GameViewport=viewport,GetFullName=function() return 'GameEngine /Engine/Transient.GameEngine_1' end})
-local statics=object({GetPlayerPawn=function() return cloud end})
+-- As in the game: no player pawn for the whole of a battle.
+local statics=object({GetPlayerPawn=function() if battle_active or pawn_gone then return nil end;return cloud end})
 local asset=object({GetAddress=function() return 123456 end,GetFullName=function() return 'EndDataObjectEnemyTerritory /Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory' end})
 function StaticFindObject(path)
     finds=(finds or 0)+1
@@ -54,6 +56,8 @@ function print(value) logs[#logs+1]=value end
 function BiomeRandomizerIsGameThread() return true end
 function BiomeRandomizerReadState() return disk,true end
 function BiomeRandomizerWriteState(value) disk=value;return true end
+function BiomeRandomizerWriteStateAsync(value) disk=value;return true end
+function BiomeRandomizerStateWriteFailed() return false end
 function BiomeRandomizerRandomSeed() return '613' end
 function BiomeRandomizerTableStatus() return json.encode({ok=true,choices=choices}) end
 function BiomeRandomizerSetNext(address,index,expected,desired)
@@ -87,9 +91,9 @@ class Adapter(unittest.TestCase):
         lua.globals().Automatic=lua.execute('return assert(load(source))()')
         lua.execute(SETUP+body)
 
-    def test_verified_clear_changes_only_its_camp_then_checks_respawn(self):
+    def test_won_fight_changes_only_its_camp_then_checks_respawn(self):
         self.run_case('''
-            battle_active=true;kill(rows[1]);auto:step();kill(rows[2]);auto:step();kill(rows[3]);auto:step()
+            battle_active=true;auto:step();kill(rows[1]);auto:step();kill(rows[2]);auto:step();kill(rows[3]);auto:step()
             assert(#native_writes==0)
             battle_active=false;auto:step();assert(not auto.fault and #native_writes==1)
             assert(choices[1]==1 and choices[2]==0 and choices[3]==0 and choices[4]==0)
@@ -98,24 +102,77 @@ class Adapter(unittest.TestCase):
             assert(auto.policy.camps.Grassland_mob_05.phase=='active')
         ''')
 
-    def test_absence_and_unload_endplay_never_count_as_deaths(self):
+    def test_a_fight_won_too_fast_to_sample_still_counts(self):
         self.run_case('''
-            for _,a in ipairs(rows) do kill(a);auto:end_play({get=function() return a end},4) end
+            battle_active=true;auto:step()
+            for _,a in ipairs(rows) do map[a.name]=nil end;auto:step()
+            battle_active=false;auto:step();assert(not auto.fault and #native_writes==1)
+        ''')
+
+    def test_fleeing_advances_and_the_surviving_group_keeps_its_composition(self):
+        self.run_case('''
+            battle_active=true;auto:step();rows[2].hp=50;auto:step()
+            battle_active=false;auto:step();assert(not auto.fault and #native_writes==1)
+            assert(json.decode(disk).cycles.Grassland_mob_05.cycle==1)
+            rows[2].hp=100;for i=1,5 do auto:step() end
+            assert(not auto.fault,auto.fault);assert(#native_writes==1)
+            for _,a in ipairs(rows) do map[a.name]=nil end;auto:step()
+            rows=group(1,'two');auto:step();assert(not auto.fault,auto.fault)
+            assert(auto.policy.camps.Grassland_mob_05.phase=='active')
+        ''')
+
+    def test_a_battle_that_never_touches_the_camp_does_not_count(self):
+        self.run_case('''
+            auto:step();battle_active=true;for i=1,5 do auto:step() end
+            battle_active=false;auto:step();assert(#native_writes==0 and not auto.fault)
+            assert(json.decode(disk).cycles.Grassland_mob_05.cycle==0)
+        ''')
+
+    def test_fleeing_without_landing_a_hit_counts_when_the_camp_joined(self):
+        self.run_case('''
+            for _,a in ipairs(rows) do a.hp=1;a.max=1 end;auto:step()
+            battle_active=true;for _,a in ipairs(rows) do a.hp=800;a.max=800 end;auto:step()
+            battle_active=false;for _,a in ipairs(rows) do a.hp=1;a.max=1 end;auto:step()
+            assert(not auto.fault,auto.fault);assert(#native_writes==1)
+        ''')
+
+    def test_another_battle_leaves_a_waiting_camp_uncounted(self):
+        self.run_case('''
+            for _,a in ipairs(rows) do a.hp=1;a.max=1 end;auto:step()
+            battle_active=true;for i=1,5 do auto:step() end
+            battle_active=false;auto:step();assert(#native_writes==0)
+        ''')
+
+    def test_absence_without_a_battle_never_counts(self):
+        self.run_case('''
+            for _,a in ipairs(rows) do kill(a) end;auto:step()
             map={};auto:step();assert(#native_writes==0 and not auto.fault)
         ''')
 
-    def test_defeat_blocks_clear_even_if_enemy_deaths_were_observed(self):
+    def test_a_load_with_no_pawn_and_no_battle_leaves_the_game_alone(self):
         self.run_case('''
-            battle_active=true;for _,a in ipairs(rows) do kill(a) end;auto:step()
-            cloud.hp=0;tifa.hp=0;aerith.hp=0;auto:step()
-            battle_active=false;cloud.hp=1;tifa.hp=1;aerith.hp=1;auto:step()
+            auto:step();loading=true
+            local real=_G.BiomeRandomizerTableStatus
+            function BiomeRandomizerTableStatus() error('table read during a load') end
+            pawn_gone=true
+            for i=1,10 do auto:step() end
+            assert(not auto.fault,auto.fault)
+            BiomeRandomizerTableStatus=real
+        ''')
+
+    def test_game_over_never_counts(self):
+        self.run_case('''
+            battle_active=true;auto:step();rows[1].hp=1;auto:step()
+            cloud.hp=0;tifa.hp=0;aerith.hp=0
+            battle_active=false;auto:step()
             assert(#native_writes==0 and json.decode(disk).cycles.Grassland_mob_05.cycle==0)
+            cloud.hp=1;tifa.hp=1;aerith.hp=1;auto:step();assert(#native_writes==0)
         ''')
 
     def test_stream_recreated_group_rebinds_without_reroll(self):
         self.run_case('''
-            kill(rows[1]);auto:step();map={};auto:step();rows=group(0,'reloaded');auto:step()
-            assert(not auto.fault and #native_writes==0 and not next(auto.policy.camps.Grassland_mob_05.deaths))
+            auto:step();map={};auto:step();rows=group(0,'reloaded');auto:step()
+            assert(not auto.fault and #native_writes==0)
         ''')
 
     def test_another_reference_writer_stops_the_selector(self):
@@ -161,30 +218,6 @@ class Adapter(unittest.TestCase):
             for _,choice in ipairs(choices) do assert(choice==0) end
             rows[1].max=100;fresh:step()
             assert(fresh.fault and #native_writes==0)
-        ''')
-
-    def test_synchronous_endplay_resolves_owned_actor_and_preserves_death(self):
-        self.run_case('''
-            local original_find=StaticFindObject
-            for index,a in ipairs(rows) do a.id='EN /Game/Level/Game/EndGame.EndGame:PersistentLevel.Enemy'..index end
-            function StaticFindObject(path)
-                for _,a in pairs(map) do if a.id:match('^[^ ]+ (.+)$')==path then return a end end
-                return original_find(path)
-            end
-            auto=Automatic.new({enabled=true,seed='613'});auto:step();battle_active=true
-            for _,a in ipairs(rows) do
-                kill(a);auto:end_play_name(a.id,0);map[a.name]=nil
-            end
-            battle_active=false;auto:step()
-            assert(not auto.fault and json.decode(disk).cycles.Grassland_mob_05.cycle==1)
-        ''')
-
-    def test_synchronous_endplay_ignores_unload_and_unowned_actor(self):
-        self.run_case('''
-            for _,a in ipairs(rows) do kill(a);auto:end_play_name(a.id,4) end
-            auto:end_play_name('EN /Game/Level/Game/EndGame.EndGame:PersistentLevel.Unowned',0)
-            map={};auto:step();assert(not auto.fault and #native_writes==0)
-            assert(json.decode(disk).cycles.Grassland_mob_05.cycle==0)
         ''')
 
     def test_early_territory_callback_prepares_before_population(self):

@@ -15,6 +15,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include "reviewed_layout.hpp"
 #include "write_arguments.hpp"
 #include "persistent_dispatch.hpp"
@@ -154,11 +157,7 @@ int read_state(const RC::LuaMadeSimple::Lua& lua) {
     }catch(...) {lua.set_string("");lua.set_bool(false);}
     return 2;
 }
-int write_state(const RC::LuaMadeSimple::Lua& lua) {
-    try {
-        if(!lua.is_string(1)) throw std::runtime_error("state_payload_type");
-        const std::string value(lua.get_string(1));
-        if(value.empty() || value.size()>16384) throw std::runtime_error("state_payload_size");
+void write_state_file(const std::string& value) {
         const auto directory=state_directory();std::filesystem::create_directories(directory);
         const auto path=directory/L"state-v1.json";
         const auto backup=directory/L"state-v1.previous.json";
@@ -180,8 +179,36 @@ int write_state(const RC::LuaMadeSimple::Lua& lua) {
             ? ReplaceFileW(path.c_str(),temporary.c_str(),nullptr,0,nullptr,nullptr)!=0
             : MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=0;
         if(!replaced || read_file(path)!=value) throw std::runtime_error("state_commit_unverified");
+}
+std::string state_argument(const RC::LuaMadeSimple::Lua& lua) {
+    if(!lua.is_string(1)) throw std::runtime_error("state_payload_type");
+    std::string value(lua.get_string(1));
+    if(value.empty() || value.size()>16384) throw std::runtime_error("state_payload_size");
+    return value;
+}
+int write_state(const RC::LuaMadeSimple::Lua& lua) {
+    try {
+        write_state_file(state_argument(lua));
         lua.set_bool(true);
     }catch(...) {lua.set_bool(false);}
+    return 1;
+}
+// Flushing, the backup copy and the atomic replace took 700 ms on the game thread
+// in a real fight, which is a visible freeze in recorded footage.
+std::mutex state_writer;
+std::atomic<bool> state_write_failed{false};
+int write_state_async(const RC::LuaMadeSimple::Lua& lua) {
+    try {
+        std::thread([value=state_argument(lua)]{
+            std::lock_guard guard(state_writer);
+            try {write_state_file(value);} catch(...) {state_write_failed=true;}
+        }).detach();
+        lua.set_bool(true);
+    }catch(...) {lua.set_bool(false);}
+    return 1;
+}
+int state_write_failed_status(const RC::LuaMadeSimple::Lua& lua) {
+    lua.set_bool(state_write_failed.load());
     return 1;
 }
 int is_game_thread(const RC::LuaMadeSimple::Lua& lua) {
@@ -270,6 +297,8 @@ public:
             state.register_function("BiomeRandomizerRandomSeed",random_seed);
             state.register_function("BiomeRandomizerReadState",read_state);
             state.register_function("BiomeRandomizerWriteState",write_state);
+            state.register_function("BiomeRandomizerWriteStateAsync",write_state_async);
+            state.register_function("BiomeRandomizerStateWriteFailed",state_write_failed_status);
             state.register_function("BiomeRandomizerIsGameThread",is_game_thread);
         };
         add(lua);add(main);add(async);for(auto* state:hooks) add(*state);

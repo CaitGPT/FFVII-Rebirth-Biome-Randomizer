@@ -32,32 +32,18 @@ function M.new(options)
         local encoded=json.encode(document)
         assert(#encoded<=16384 and options.write(encoded)==true,'state_write_unverified')
     end
-    if document.pending then
-        local p=document.pending;local row=type(p)=='table' and document.cycles[p.camp]
-        assert(row and integer(p.cycle) and p.cycle==row.cycle+1,'pending_cycle_invalid')
-        assert(p.before==options.selection(document.seed,p.camp,row.cycle,options.pools[p.camp]),'pending_before_invalid')
-        assert(p.after==options.selection(document.seed,p.camp,p.cycle,options.pools[p.camp]),'pending_after_invalid')
-        -- A clear was proved before preparing this intent. A fresh process
-        -- has original game data, so finish that intent exactly once.
-        row.cycle=p.cycle;document.pending=nil;persist()
-    elseif fresh then persist() end
+    if fresh then persist() end
     local self={seed=document.seed,cycles=copy(document.cycles)}
-    function self:prepare(proposal)
-        assert(not document.pending,'pending_transaction_exists')
-        local row=document.cycles[proposal.camp]
-        assert(row and proposal.cycle==row.cycle+1,'proposal_cycle_differs')
-        assert(proposal.before==options.selection(document.seed,proposal.camp,row.cycle,options.pools[proposal.camp]),'proposal_before_differs')
-        assert(proposal.after==options.selection(document.seed,proposal.camp,proposal.cycle,options.pools[proposal.camp]),'proposal_after_differs')
-        document.pending={camp=proposal.camp,cycle=proposal.cycle,before=proposal.before,after=proposal.after}
-        persist()
-    end
-    function self:commit(cycles)
-        assert(document.pending,'missing_pending_transaction')
-        for camp,row in pairs(document.cycles) do
-            local expected=camp==document.pending.camp and document.pending.cycle or row.cycle
-            assert(cycles[camp] and cycles[camp].cycle==expected,'commit_cycle_differs')
+    -- Saves one camp's new counter on a background thread. A crash before it lands
+    -- only means that camp rolls its previous choice again next time.
+    function self:save(camp,cycles)
+        for name,row in pairs(document.cycles) do
+            local expected=name==camp and row.cycle+1 or row.cycle
+            assert(cycles[name] and cycles[name].cycle==expected,'save_cycle_differs')
         end
-        document.cycles=copy(cycles);document.pending=nil;persist();self.cycles=copy(cycles)
+        document.cycles=copy(cycles);self.cycles=copy(cycles)
+        local encoded=json.encode(document)
+        assert(#encoded<=16384 and options.write_async(encoded)==true,'state_write_not_queued')
     end
     return self
 end

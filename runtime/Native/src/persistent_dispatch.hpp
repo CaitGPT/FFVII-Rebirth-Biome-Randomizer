@@ -43,7 +43,7 @@ class PersistentDispatch {
         double max_gap{};
 #endif
         Clock::time_point next{},refresh{};
-        RC::Unreal::FName begin,end;
+        RC::Unreal::FName begin;
         // The installed SDK spells FName as class; the historical headers
         // spell it struct, changing this getter's mangled return type.
         using NameGetter=const RC::Unreal::FName& (*)(const RC::Unreal::UObject*);
@@ -93,15 +93,6 @@ class PersistentDispatch {
                 if(full.find(L" /Game/Level/Game/Field/1200-GRASA/")!=std::wstring::npos &&
                    full.starts_with(L"EndFieldEnemyTerritoryActor "))
                     lua->call_function("BiomeRandomizerTerritoryBegin",0,0);
-            } else if(name==shared->end && actor && parameters) {
-                const auto full=actor->GetFullName();
-                if(full.starts_with(L"EN") && full.find(L" /Game/Level/Game/EndGame.EndGame:")!=std::wstring::npos) {
-                    unsigned char reason{};SIZE_T copied{};
-                    if(ReadProcessMemory(GetCurrentProcess(),parameters,&reason,1,&copied) && copied==1 && reason==0) {
-                        const auto id=ascii(full);
-                        if(!id.empty()){lua->prepare_function_call("BiomeRandomizerActorEnd");lua->set_string(id);lua->set_integer(reason);lua->call_function(2,0);}
-                    }
-                }
             }
             if(Clock::now()>=shared->next) {
                 const auto started=Clock::now();
@@ -147,7 +138,6 @@ public:
             "?GetNamePrivate@UObjectBase@Unreal@RC@@QEBAAEBVFName@23@XZ"));
         if(!state->name){state->fault=true;log("pinned name getter unavailable; stopped");return;}
         state->begin=RC::Unreal::FName(L"ReceiveBeginPlay",RC::Unreal::FNAME_Find);
-        state->end=RC::Unreal::FName(L"ReceiveEndPlay",RC::Unreal::FNAME_Find);
         auto shared=state;
         RC::Unreal::Hook::RegisterProcessEventPreCallback([shared](auto* a,auto* f,void* p){dispatch(shared,a,f,p);});
     }
@@ -157,8 +147,7 @@ public:
         if(Clock::now()>=state->refresh){state->thread=state->window_thread();state->refresh=Clock::now()+std::chrono::seconds(1);}
         if(!state->pending) return;
         auto* main=state->pending;state->pending=nullptr;
-        if(!main->is_global_function("BiomeRandomizerTick") || !main->is_global_function("BiomeRandomizerTerritoryBegin") ||
-           !main->is_global_function("BiomeRandomizerActorEnd")){state->fault=true;log("paired persistent entry points missing; stopped");return;}
+        if(!main->is_global_function("BiomeRandomizerTick") || !main->is_global_function("BiomeRandomizerTerritoryBegin")){state->fault=true;log("paired persistent entry points missing; stopped");return;}
         state->current=main;state->next={};
         log("persistent main state attached, period=100ms");
     }

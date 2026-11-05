@@ -1,5 +1,5 @@
--- Engine-independent lifecycle policy. Native adapters must supply verified
--- identities/deaths/clear outcomes; an actor disappearing is never a death.
+-- Engine-independent lifecycle policy. A camp's counter advances once for each
+-- fight against it that ends without a Game Over, whether the party won or fled.
 local M={algorithm='sha256-respawn-v1'}
 local function integer(n) return type(n)=='number' and n%1==0 end
 local function selection(seed,camp,cycle,pool,sha256)
@@ -22,14 +22,14 @@ function M.new(seed,pools,saved,sha256)
         local previous=saved and saved[camp]
         local cycle=previous and previous.cycle or 0
         assert(integer(cycle) and cycle>=0 and cycle<=10000000,'invalid cycle')
-        self.camps[camp]={cycle=cycle,choice=selection(seed,camp,cycle,pool,sha256),members={},deaths={},phase='unknown'}
+        self.camps[camp]={cycle=cycle,choice=selection(seed,camp,cycle,pool,sha256),members={},engaged=false,phase='unknown'}
     end
     function self:reset_epoch(epoch)
         assert(type(epoch)=='string' and #epoch>0,'invalid epoch')
         if self.epoch==epoch then return end
         self.epoch=epoch
         for _,state in pairs(self.camps) do
-            state.members={};state.deaths={};state.phase='unknown'
+            state.members={};state.engaged=false;state.phase='unknown'
             -- A reload invalidates an uncommitted proposal, never an accepted
             -- cycle or a fault caused by an uncertain native write.
             state.proposal=nil
@@ -49,38 +49,30 @@ function M.new(seed,pools,saved,sha256)
             for id in pairs(members) do if not state.members[id] then return false end end
             return true
         end
-        state.members=members;state.deaths={};state.phase='active';return true
+        state.members=members;state.engaged=false;state.phase='active';return true
     end
-    function self:death(camp,epoch,id,hp)
+    function self:engage(camp,epoch)
         local state=self.camps[camp]
-        if self.fault or not state or epoch~=self.epoch or state.phase~='active' or hp~=0 or not state.members[id] then return false end
-        if state.deaths[id] then return false end
-        state.deaths[id]=true;return true
-    end
-    function self:alive(camp,epoch,id,hp)
-        local state=self.camps[camp]
-        if self.fault or not state or epoch~=self.epoch or state.phase~='active' or not integer(hp) or hp<=0 or not state.members[id] then return false end
-        state.deaths[id]=nil;return true
+        if self.fault or not state or epoch~=self.epoch or state.phase=='pending' then return false end
+        if state.engaged then return false end
+        state.engaged=true;return true
     end
     function self:cancel_group(camp,epoch)
         local state=self.camps[camp]
         if self.fault or not state or epoch~=self.epoch or state.phase=='pending' then return false end
-        state.members={};state.deaths={};state.phase='unknown';return true
+        state.members={};state.engaged=false;state.phase='unknown';return true
     end
     function self:rebind_group(camp,epoch,choice,ids,complete)
         local state=self.camps[camp]
         if self.fault or not state or epoch~=self.epoch or state.phase~='active' or choice~=state.choice or not complete or #ids==0 then return false end
-        state.phase='unknown';state.members={};state.deaths={}
+        state.phase='unknown';state.members={};state.engaged=false
         return self:observe_group(camp,epoch,ids,true)
     end
-    function self:confirmed_clear(camp,epoch,outcome)
+    function self:fight_ended(camp,epoch)
         local state=self.camps[camp]
-        if self.fault or not state or epoch~=self.epoch or state.phase~='active' or outcome~='victory' then return nil end
-        local count=0
-        for id in pairs(state.members) do
-            count=count+1;if not state.deaths[id] then return nil end
-        end
-        if count==0 or state.cycle>=10000000 then return nil end
+        if self.fault or not state or epoch~=self.epoch or state.phase=='pending' or not state.engaged then return nil end
+        if state.cycle>=10000000 then return nil end
+        state.engaged=false
         state.phase='pending'
         state.proposal={camp=camp,epoch=epoch,cycle=state.cycle+1,
             before=state.choice,after=selection(self.seed,camp,state.cycle+1,self.pools[camp],sha256)}

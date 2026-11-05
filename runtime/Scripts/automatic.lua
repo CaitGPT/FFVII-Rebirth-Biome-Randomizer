@@ -15,8 +15,9 @@ local orc_spec='CharaSpec_EN2211_01_Ogre_OrcEnd2'
 local camp_positions={Grassland_mob_05={131878,-71156},Grassland_mob_23={171443,-71068},
     Grassland_mob_29={120825,-58499},Grassland_mob_30={196655,-73926}}
 local near_cm,region_cm=20000,250000
-local far_seconds,near_seconds,battle_seconds=1,0.5,0.25
+local far_seconds,near_seconds=1,0.5
 local members_seconds,table_seconds,retry_seconds,territory_seconds=2,5,5,5
+local pawnless_limit=3
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -36,7 +37,7 @@ local function emit(event,fields)
     print('[BiomeRandomizerRuntime] '..json.encode(fields)..'\n')
 end
 function M.new(config)
-    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},apis={},next_step=0,members_at=0,table_at=0,retry_at=0,territory_at=0,prepared=false}
+    local self={fault=nil,policy=nil,store=nil,epoch=nil,apis={},health={},stale={},next_step=0,members_at=0,pawnless=0,table_at=0,retry_at=0,territory_at=0,prepared=false}
     local function fail(reason)
         if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
     end
@@ -99,6 +100,7 @@ function M.new(config)
     local function initialize()
         if self.policy then return end
         self.store=StateStore.new({json=json,read=BiomeRandomizerReadState,write=BiomeRandomizerWriteState,
+            write_async=BiomeRandomizerWriteStateAsync,
             random_seed=BiomeRandomizerRandomSeed,seed=config.seed,algorithm=Lifecycle.algorithm,
             scope='grasslands-four-level15-e515-v1',pools=pools,
             selection=function(seed,camp,cycle,pool) return Lifecycle.selection(seed,camp,cycle,pool,BiomeRandomizerSHA256) end})
@@ -182,18 +184,13 @@ function M.new(config)
         if type(hp)~='number' or type(max)~='number' or hp<0 or max<=0 then return nil end
         return {id=actor:GetFullName(),name=name,spec=spec,hp=hp,max_hp=max,state=state}
     end
-    local function death(camp,value,source)
-        if value.hp==0 and value.max_hp>0 and value.state==6 and self.policy:death(camp,self.epoch,value.id,0) then
-            emit('death_verified',{camp=camp,id=value.id,source=source})
-        elseif value.hp>0 then self.policy:alive(camp,self.epoch,value.id,value.hp) end
-    end
     local function refresh_members(battle,party)
         local epoch,alive=members(battle,party)
         if not epoch then return false end
         initialize()
         self.alive=alive
         if epoch~=self.epoch then
-            self.epoch=epoch;self.owned={};self.policy:reset_epoch(epoch)
+            self.epoch=epoch;self.health={};self.stale={};self.policy:reset_epoch(epoch)
             emit('epoch_observed',{actor_count=party:GetBattleMemberCount()})
         end
         return true
@@ -205,18 +202,35 @@ function M.new(config)
         self.next_step=now+far_seconds
         local ok,error_value=pcall(function()
             local actor=pawn()
-            if not actor then
-                -- Loading, or a scene. Whatever was resolved may be gone after it.
-                self.asset_object=nil;self.prepared=false;self.pawn_address=nil
-                return
-            end
-            local location=actor:K2_GetActorLocation()
             local near={};local in_region=false
-            for index,camp in ipairs(ids) do
-                local dx,dy=location.X-camp_positions[camp][1],location.Y-camp_positions[camp][2]
-                local distance=dx*dx+dy*dy
-                if distance<near_cm*near_cm then near[#near+1]=index end
-                if distance<region_cm*region_cm then in_region=true end
+            if actor then
+                self.pawnless=0
+                local location=actor:K2_GetActorLocation()
+                for index,camp in ipairs(ids) do
+                    local dx,dy=location.X-camp_positions[camp][1],location.Y-camp_positions[camp][2]
+                    local distance=dx*dx+dy*dy
+                    if distance<near_cm*near_cm then near[#near+1]=index end
+                    if distance<region_cm*region_cm then in_region=true end
+                end
+                self.last_near=near
+            else
+                -- The game reports no player pawn for the whole of a battle, as well
+                -- as during loads and scenes. Keep watching a camp the player was at
+                -- if a battle is on. Otherwise leave the game alone: whatever was
+                -- resolved may be gone, and this may be the game shutting down.
+                local last=self.last_near
+                if not last or #last==0 then
+                    self.asset_object=nil;self.prepared=false;self.pawn_address=nil
+                    return
+                end
+                local battle=api('EndBattleAPI')
+                if not valid(battle) or battle:IsInBattle()~=true then
+                    self.asset_object=nil;self.prepared=false;self.pawn_address=nil
+                    self.pawnless=self.pawnless+1
+                    if self.pawnless>=pawnless_limit then self.last_near=nil end
+                    return
+                end
+                self.pawnless=0;near=last
             end
             if #near==0 then
                 self.asset_object=nil
@@ -228,11 +242,14 @@ function M.new(config)
                 object=asset();if not valid(object) then return end
                 fresh=true
             end
-            local battle,party,field=api('EndBattleAPI'),api('EndPartyAPI'),api('EndFieldAPI')
-            if not valid(battle) or not valid(party) or not valid(field) then return end
+            local battle,party=api('EndBattleAPI'),api('EndPartyAPI')
+            if not valid(battle) or not valid(party) then return end
             if self.alive==nil or now>=self.members_at then
                 if not refresh_members(battle,party) then return end
                 self.members_at=now+members_seconds
+            end
+            if not self.write_warned and BiomeRandomizerStateWriteFailed() then
+                self.write_warned=true;emit('state_write_failed',{})
             end
             if fresh or now>=self.table_at then
                 local status=table_status(object);if not prepare_references(object,status) then return end
@@ -244,9 +261,10 @@ function M.new(config)
                 for _,camp in ipairs(ids) do self.policy:cancel_group(camp,self.epoch) end
                 return
             end
-            local in_battle=field:IsDuringBattle()
+            -- EndFieldAPI's IsDuringBattle stays false through ordinary field fights.
+            local in_battle=battle:IsInBattle()
             if type(in_battle)~='boolean' then return end
-            self.next_step=now+(in_battle and battle_seconds or near_seconds)
+            self.next_step=now+near_seconds
             for _,index in ipairs(near) do
                 local camp=ids[index]
                 local current={};local first_choice
@@ -264,10 +282,11 @@ function M.new(config)
                 local live_ids={}
                 for _,value in ipairs(current) do
                     if value.hp>0 then live_ids[#live_ids+1]=value.id end
-                    self.owned[value.id]={camp=camp,name=value.name,spec=value.spec}
                 end
                 local state=self.policy.camps[camp]
-                if #live_ids==3 and first_choice~=nil then
+                if #current==0 then self.stale[camp]=nil end
+                if #live_ids==3 and first_choice~=nil and not (self.stale[camp] and first_choice~=state.choice) then
+                    self.stale[camp]=nil
                     if state.phase=='cleared' then
                         assert(self.policy:respawn(camp,self.epoch,first_choice,live_ids,true),'respawn_unverified')
                         emit('spawn_observed',{camp=camp,cycle=state.cycle,choice=first_choice,ids=live_ids})
@@ -290,22 +309,42 @@ function M.new(config)
                             emit('group_rebound',{camp=camp,cycle=state.cycle,choice=first_choice})
                         end
                     end
-                    local current_ids={};for _,id in ipairs(live_ids) do current_ids[id]=true end
-                    for id,owner in pairs(self.owned) do if owner.camp==camp and not current_ids[id] then self.owned[id]=nil end end
                 end
-                for _,value in ipairs(current) do death(camp,value,'poll') end
-                if not in_battle and next(state.deaths) then
-                    -- Party state is otherwise sampled slowly; never commit on an old one.
-                    if not refresh_members(battle,party) or self.alive==0 then return end
-                    local proposal=self.policy:confirmed_clear(camp,self.epoch,'victory')
-                    if proposal then
-                        self.store:prepare(proposal)
-                        local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,proposal.before,proposal.after))
-                        assert(result.ok and self.policy:commit(proposal,result.choices[index]),'native_cycle_unverified')
-                        remember(result)
-                        self.store:commit(self.policy:checkpoint())
-                        emit('cycle_committed',{camp=camp,cycle=proposal.cycle,before=proposal.before,after=proposal.after})
+                if in_battle then
+                    -- Enemies report 1/1 HP until a battle takes them in. Real HP arriving,
+                    -- damage or a loss means this camp is in the fight; another enemy
+                    -- nearby, or a simulator battle, changes none of them.
+                    local before=self.health[camp]
+                    local joined=false
+                    for _,value in ipairs(current) do
+                        if value.hp<value.max_hp or (before and before.waiting and value.max_hp>1) then joined=true end
                     end
+                    if (joined or (before and #live_ids<before.alive)) and self.policy:engage(camp,self.epoch) then
+                        emit('fight_observed',{camp=camp,cycle=state.cycle})
+                    end
+                    if not before and #live_ids>0 then self.health[camp]={alive=#live_ids,waiting=false} end
+                else
+                    if state.engaged then
+                        -- The party is otherwise sampled slowly. Never decide on an old
+                        -- reading: all of them down here means a Game Over, not a fight won.
+                        if not refresh_members(battle,party) then return end
+                        if self.alive==0 then
+                            self.policy:cancel_group(camp,self.epoch)
+                            return
+                        end
+                        local proposal=self.policy:fight_ended(camp,self.epoch)
+                        if proposal then
+                            local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,proposal.before,proposal.after))
+                            assert(result.ok and self.policy:commit(proposal,result.choices[index]),'native_cycle_unverified')
+                            remember(result)
+                            self.store:save(camp,self.policy:checkpoint())
+                            self.stale[camp]=#live_ids>0 or nil
+                            emit('cycle_committed',{camp=camp,cycle=proposal.cycle,before=proposal.before,after=proposal.after,survivors=#live_ids})
+                        end
+                    end
+                    local waiting=false
+                    for _,value in ipairs(current) do if value.max_hp==1 then waiting=true end end
+                    self.health[camp]=#live_ids>0 and {alive=#live_ids,waiting=waiting} or nil
                 end
             end
         end)
@@ -322,27 +361,6 @@ function M.new(config)
             initialize();prepare_references(object,table_status(object))
         end)
         if not ok then fail(error_value) end
-    end
-    function self:end_play(context,reason)
-        if self.fault or not self.policy or not BiomeRandomizerIsGameThread() then return end
-        local ok,error_value=pcall(function()
-            local why=type(reason)=='number' and reason or reason:get()
-            if why~=0 then return end -- level unload/removal is never a death
-            local actor=context:get();if not valid(actor) then return end
-            local id=actor:GetFullName();local owner=self.owned[id]
-            if not owner then return end
-            local battle=api('EndBattleAPI');if not valid(battle) then return end
-            local value={id=id,hp=battle:GetCharaHP(actor),max_hp=battle:GetHPMax(actor),state=battle:GetCharacterStateType(actor)}
-            if type(value.hp)=='number' and type(value.max_hp)=='number' then death(owner.camp,value,'end_play_destroyed') end
-        end)
-        if not ok then fail(error_value) end
-    end
-    function self:end_play_name(id,reason)
-        if self.fault or not self.policy or reason~=0 or type(id)~='string' or not self.owned[id] or not BiomeRandomizerIsGameThread() then return end
-        local owner=self.owned[id]
-        local path=id:match('^[^ ]+ (.+)$');if not path then return end
-        local actor=resolve(path);if not valid(actor) or actor:GetFullName()~=id then return end
-        self:end_play({get=function() return actor end},reason)
     end
     return self
 end

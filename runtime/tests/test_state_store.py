@@ -1,4 +1,4 @@
-"""Synthetic journal crash/corruption cases; not native filesystem acceptance."""
+"""Synthetic state and corruption cases; not native filesystem acceptance."""
 from pathlib import Path
 import hashlib
 import unittest
@@ -19,6 +19,7 @@ class Store(unittest.TestCase):
             function options(seed)
                 return {json=json,read=function() return disk,true end,
                     write=function(value) writes=writes+1;if not write_ok then return false end;disk=value;return true end,
+                    write_async=function(value) writes=writes+1;if not write_ok then return false end;disk=value;return true end,
                     random_seed=function() return 'created-seed' end,seed=seed or 'auto',
                     algorithm=Life.algorithm,scope='fixture',pools=pools,
                     selection=function(seed,camp,cycle,pool) return Life.selection(seed,camp,cycle,pool,hash) end}
@@ -32,25 +33,21 @@ class Store(unittest.TestCase):
             assert(b.cycles.camp05.cycle==0 and b.cycles.camp23.cycle==0)
         ''')
 
-    def test_prepared_clear_recovers_exactly_once_after_crash(self):
+    def test_saved_counter_is_reused_by_the_next_process(self):
         self.run_case('''
             local a=Store.new(options('613'))
-            local p={camp='camp05',cycle=1,before=Life.selection('613','camp05',0,pools.camp05,hash),
-                after=Life.selection('613','camp05',1,pools.camp05,hash)}
-            a:prepare(p);assert(json.decode(disk).pending.cycle==1)
-            local b=Store.new(options('613'));assert(b.cycles.camp05.cycle==1 and not json.decode(disk).pending)
-            local before=writes;local c=Store.new(options('613'));assert(c.cycles.camp05.cycle==1 and writes==before)
+            a:save('camp05',{camp05={cycle=1},camp23={cycle=0}})
+            local b=Store.new(options('613'));assert(b.cycles.camp05.cycle==1 and b.cycles.camp23.cycle==0)
         ''')
 
-    def test_failed_write_refuses_start_or_commit(self):
+    def test_failed_write_refuses_start_or_save(self):
         self.run_case('''
             write_ok=false;assert(not pcall(function() Store.new(options()) end));assert(disk=='')
         ''')
         self.run_case('''
             local a=Store.new(options('s'));write_ok=false
-            local p={camp='camp05',cycle=1,before=Life.selection('s','camp05',0,pools.camp05,hash),
-                after=Life.selection('s','camp05',1,pools.camp05,hash)}
-            assert(not pcall(function() a:prepare(p) end));assert(not json.decode(disk).pending)
+            assert(not pcall(function() a:save('camp05',{camp05={cycle=1},camp23={cycle=0}}) end))
+            assert(json.decode(disk).cycles.camp05.cycle==0)
         ''')
 
     def test_corrupt_or_incompatible_state_never_silently_resets(self):
@@ -71,15 +68,12 @@ class Store(unittest.TestCase):
             local b=Store.new(options('second'));assert(b.seed=='second' and b.cycles.camp05.cycle==0 and writes==2)
         ''')
 
-    def test_commit_cannot_advance_an_unselected_camp(self):
+    def test_save_cannot_advance_an_unselected_camp(self):
         self.run_case('''
             local a=Store.new(options('s'))
-            local p={camp='camp05',cycle=1,before=Life.selection('s','camp05',0,pools.camp05,hash),
-                after=Life.selection('s','camp05',1,pools.camp05,hash)}
-            a:prepare(p)
-            assert(not pcall(function() a:commit({camp05={cycle=1},camp23={cycle=1}}) end))
-            a:commit({camp05={cycle=1},camp23={cycle=0}})
-            assert(json.decode(disk).cycles.camp05.cycle==1 and not json.decode(disk).pending)
+            assert(not pcall(function() a:save('camp05',{camp05={cycle=1},camp23={cycle=1}}) end))
+            a:save('camp05',{camp05={cycle=1},camp23={cycle=0}})
+            assert(json.decode(disk).cycles.camp05.cycle==1)
         ''')
 
 if __name__=='__main__':unittest.main()
