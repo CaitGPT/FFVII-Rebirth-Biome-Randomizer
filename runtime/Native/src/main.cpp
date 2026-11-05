@@ -268,27 +268,53 @@ std::string hex(const unsigned char* data, std::size_t size) {
     for (std::size_t i=0;i<size;++i) out << std::hex << std::setw(2) << std::setfill('0') << unsigned(data[i]);
     return out.str();
 }
-// Spawn lists: which camps may be changed, and which of them are filled in this level.
-std::unordered_map<std::wstring,RC::Unreal::UObject*> spawn_ready;
+// Spawn lists. The territory spawn actors don't report BeginPlay, so they're polled: finding them
+// by class is cheap in native code. New actors are filled at once; actors that have gone mean their
+// level is unloading, and Lua puts its table back before the next level's actors appear.
 std::unordered_set<std::wstring> spawn_camps;
-unsigned long long spawn_seen{},spawn_filled{},spawn_refused{};
+std::unordered_map<RC::Unreal::UObject*,std::wstring> spawn_actor_camp; // every allowlisted actor seen alive
+std::unordered_map<std::wstring,RC::Unreal::UObject*> spawn_ready;
+unsigned long long spawn_seen{},spawn_filled{},spawn_refused{},spawn_polls{};
 std::wstring camp_of(const std::wstring& full) {
     const auto at=full.rfind(L'.');
     return at==std::wstring::npos?std::wstring{}:full.substr(at+1);
 }
-void prepare_spawn_actor(RC::Unreal::UObject* actor,const std::wstring& full) {
+int spawn_poll(const RC::LuaMadeSimple::Lua& lua) {
     if(spawn_camps.empty())
         for(const auto& table:reviewed::tables)
             for(std::size_t i=0;i<table.target_count;++i) spawn_camps.insert(table.targets[i].id);
-    ++spawn_seen;
-    const auto camp=camp_of(full);
-    if(!spawn_camps.contains(camp)) return;
-    const auto found=spawn_ready.find(camp);
-    if(found!=spawn_ready.end() && found->second==actor) return;
-    const int filled=spawn::fill(actor);
-    if(filled<0) {++spawn_refused;return;}
-    spawn_filled+=static_cast<unsigned long long>(filled);
-    spawn_ready[camp]=actor;
+    long long fresh=0,gone=0;
+    std::string gone_camps;
+    try {
+        ++spawn_polls;
+        std::vector<RC::Unreal::UObject*> found;
+        RC::Unreal::UObjectGlobals::FindAllOf(STR("EndFieldEnemyTerritoryServerBuildActor"),found);
+        std::unordered_set<RC::Unreal::UObject*> alive(found.begin(),found.end());
+        for(auto it=spawn_actor_camp.begin();it!=spawn_actor_camp.end();) {
+            if(!alive.contains(it->first)) {
+                const auto ready=spawn_ready.find(it->second);
+                if(ready!=spawn_ready.end() && ready->second==it->first) {
+                    spawn_ready.erase(ready);++gone;
+                    if(gone_camps.size()<8000) {gone_camps+=gone_camps.empty()?"":",";gone_camps+=std::string(it->second.begin(),it->second.end());}
+                }
+                it=spawn_actor_camp.erase(it);
+            } else ++it;
+        }
+        for(auto* object:found) {
+            if(spawn_actor_camp.contains(object)) continue;
+            const auto full=object->GetFullName();
+            if(!full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) continue;
+            const auto camp=camp_of(full);
+            ++spawn_seen;
+            if(!spawn_camps.contains(camp)) {spawn_actor_camp[object]=L"";continue;}
+            const int filled=spawn::fill(object);
+            if(filled<0) {++spawn_refused;continue;}
+            spawn_filled+=static_cast<unsigned long long>(filled);
+            spawn_actor_camp[object]=camp;spawn_ready[camp]=object;++fresh;
+        }
+    } catch(...) {++spawn_refused;}
+    lua.set_string("{\"fresh\":"+std::to_string(fresh)+",\"gone\":"+std::to_string(gone)+",\"gone_camps\":\""+gone_camps+"\"}");
+    return 1;
 }
 int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
     if(!lua.is_string(1)) {lua.set_bool(false);return 1;}
@@ -296,27 +322,12 @@ int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
     lua.set_bool(spawn_ready.contains(std::wstring(camp.begin(),camp.end())));
     return 1;
 }
-int spawn_scan(const RC::LuaMadeSimple::Lua& lua) {
-    // These actors don't report BeginPlay, so find them once they exist. Done here rather than in
-    // Lua, where a large result allocates a wrapper per object. Returns how many were found.
-    std::vector<RC::Unreal::UObject*> found;
-    try {
-        RC::Unreal::UObjectGlobals::FindAllOf(STR("EndFieldEnemyTerritoryServerBuildActor"),found);
-        for(auto* object:found) {
-            const auto full=object->GetFullName();
-            if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) prepare_spawn_actor(object,full);
-        }
-    } catch(...) {++spawn_refused;}
-    lua.set_integer(static_cast<std::int64_t>(found.size()));
-    return 1;
-}
-int spawn_reset(const RC::LuaMadeSimple::Lua&) {spawn_ready.clear();return 0;}
 int spawn_stats(const RC::LuaMadeSimple::Lua& lua) {
-    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+"}");
+    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+",\"polls\":"+std::to_string(spawn_polls)+"}");
     return 1;
 }
 class Runtime : public RC::CppUserModBase {
-    PersistentDispatch dispatch{window_thread,prepare_spawn_actor};
+    PersistentDispatch dispatch{window_thread};
 public:
     Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.0");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
     void on_unreal_init() override { dispatch.install(); }
@@ -330,8 +341,7 @@ public:
         if (name!=STR("BiomeRandomizerRuntime")) return;
         const auto add=[](RC::LuaMadeSimple::Lua& state) {
             state.register_function("BiomeRandomizerSpawnReady",spawn_is_ready);
-            state.register_function("BiomeRandomizerSpawnScan",spawn_scan);
-            state.register_function("BiomeRandomizerSpawnReset",spawn_reset);
+            state.register_function("BiomeRandomizerSpawnPoll",spawn_poll);
             state.register_function("BiomeRandomizerSpawnStats",spawn_stats);
             state.register_function("BiomeRandomizerTableStatus",table_status);
             state.register_function("BiomeRandomizerSetNext",set_next);

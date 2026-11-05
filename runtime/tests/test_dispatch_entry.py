@@ -7,12 +7,11 @@ class DispatchEntry(unittest.TestCase):
     def test_synchronous_callbacks_need_no_async_hooks_and_survive_collection(self):
         lua=LuaRuntime()
         lua.execute('''
-            ticks=0;begins=0
+            ticks=0
             function BiomeRandomizerTableStatus() end
             package.loaded.config={enabled=true,seed='13'}
             package.loaded.automatic={new=function(config) return {
                 step=function() ticks=ticks+1 end,
-                territory_begin=function() begins=begins+1 end,
             } end}
             function LoopAsync() error('async work forbidden') end
             function ExecuteInGameThread() error('transient coroutine forbidden') end
@@ -20,9 +19,8 @@ class DispatchEntry(unittest.TestCase):
         ''')
         lua.execute((Path(__file__).parents[1]/'Scripts/main.lua').read_text(encoding='utf-8'))
         lua.execute('''
-            BiomeRandomizerTerritoryBegin()
             for i=1,10000 do BiomeRandomizerTick();if i%100==0 then collectgarbage('collect') end end
-            assert(ticks==10000 and begins==1)
+            assert(ticks==10000)
         ''')
 
     def test_missing_native_module_stays_inactive_and_says_so(self):

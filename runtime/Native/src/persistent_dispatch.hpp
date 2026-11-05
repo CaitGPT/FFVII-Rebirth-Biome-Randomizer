@@ -51,7 +51,6 @@ class PersistentDispatch {
         using NameGetter=const RC::Unreal::FName& (*)(const RC::Unreal::UObject*);
         NameGetter name{};
         DWORD (*window_thread)(){};
-        void (*spawn_actor)(RC::Unreal::UObject*,const std::wstring&){};
     };
     std::shared_ptr<State> state=std::make_shared<State>();
     static void log(std::string message) noexcept {
@@ -99,22 +98,6 @@ class PersistentDispatch {
         const int top=lua->get_stack_size();
         shared->dispatching=true;
         try {
-            if(called==shared->begin && actor) {
-                const auto full=actor->GetFullName();
-                if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) {
-                    if(shared->spawn_actor) shared->spawn_actor(actor,full);
-                } else if(full.starts_with(L"EndFieldEnemyTerritoryActor ")) {
-                    constexpr std::wstring_view marker=L"/Game/Level/Game/Field/";
-                    const auto at=full.find(marker);
-                    if(at!=std::wstring::npos) {
-                        const auto start=at+marker.size();const auto end=full.find(L'/',start);
-                        if(end!=std::wstring::npos) {
-                            const auto region=ascii(std::wstring_view(full).substr(start,end-start));
-                            lua->prepare_function_call("BiomeRandomizerTerritoryBegin");lua->set_string(region);lua->call_function(1,0);
-                        }
-                    }
-                }
-            }
             if(Clock::now()>=shared->next) {
                 const auto started=Clock::now();
                 lua->call_function("BiomeRandomizerTick",0,0);
@@ -153,7 +136,7 @@ class PersistentDispatch {
         shared->dispatching=false;
     }
 public:
-    explicit PersistentDispatch(DWORD (*thread)(),void (*spawn_actor)(RC::Unreal::UObject*,const std::wstring&)){state->window_thread=thread;state->spawn_actor=spawn_actor;}
+    explicit PersistentDispatch(DWORD (*thread)()){state->window_thread=thread;}
     void install() {
         state->name=reinterpret_cast<State::NameGetter>(GetProcAddress(GetModuleHandleW(L"UE4SS.dll"),
             "?GetNamePrivate@UObjectBase@Unreal@RC@@QEBAAEBVFName@23@XZ"));
@@ -169,7 +152,7 @@ public:
         if(Clock::now()>=state->refresh){state->thread=state->window_thread();state->refresh=Clock::now()+std::chrono::seconds(1);}
         if(!state->pending) return;
         auto* main=state->pending;state->pending=nullptr;
-        if(!main->is_global_function("BiomeRandomizerTick") || !main->is_global_function("BiomeRandomizerTerritoryBegin")){state->fault=true;log("paired persistent entry points missing; stopped");return;}
+        if(!main->is_global_function("BiomeRandomizerTick")){state->fault=true;log("paired persistent entry points missing; stopped");return;}
         state->current=main;state->next={};
         log("persistent main state attached, period=100ms");
     }

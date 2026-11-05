@@ -9,4 +9,3 @@ local automatic=require('automatic').new(config)
 -- The paired DLL owns synchronous dispatch on the verified game thread.
 -- No LoopAsync, ExecuteInGameThread or Lua RegisterHook coroutines.
 function BiomeRandomizerTick() automatic:step() end
-function BiomeRandomizerTerritoryBegin(region) automatic:territory_begin(region) end
