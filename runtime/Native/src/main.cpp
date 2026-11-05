@@ -16,6 +16,7 @@
 #include <fstream>
 #include "reviewed_layout.hpp"
 #include "write_arguments.hpp"
+#include "persistent_dispatch.hpp"
 
 namespace {
 std::string hex(const unsigned char* data, std::size_t size);
@@ -248,8 +249,15 @@ int inspect(const RC::LuaMadeSimple::Lua& lua) {
     lua.set_string(out.str());return 1;
 }
 class Runtime : public RC::CppUserModBase {
+    PersistentDispatch dispatch{window_thread};
 public:
-    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("0.0.2-automatic-prototype");ModAuthors=STR("Codex");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
+    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("0.0.3-persistent-prototype");ModAuthors=STR("Codex");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
+    void on_unreal_init() override { dispatch.install(); }
+    void on_update() override { dispatch.activate(); }
+    void on_lua_stop(RC::StringViewType name,RC::LuaMadeSimple::Lua&,RC::LuaMadeSimple::Lua&,
+                     RC::LuaMadeSimple::Lua&,std::vector<RC::LuaMadeSimple::Lua*>&) override {
+        if(name==STR("BiomeRandomizerRuntime")) dispatch.detach();
+    }
     void on_lua_start(RC::StringViewType name, RC::LuaMadeSimple::Lua& lua, RC::LuaMadeSimple::Lua& main,
                       RC::LuaMadeSimple::Lua& async, std::vector<RC::LuaMadeSimple::Lua*>& hooks) override {
         if (name!=STR("BiomeRandomizerRuntime")) return;
@@ -264,6 +272,7 @@ public:
             state.register_function("BiomeRandomizerIsGameThread",is_game_thread);
         };
         add(lua);add(main);add(async);for(auto* state:hooks) add(*state);
+        dispatch.prepare(main);
     }
 };
 }

@@ -2,6 +2,9 @@
 
 ## Unreleased: 1.0.0 runtime prototype
 
+- Replace the async Lua executor after native camp23 combat exposed a stopped Lua-state callback; persistent game-thread repair passes27 synthetic checks and awaits native acceptance.
+- Add runtime installation/removal instructions and a parameterized, commit-checked native build recipe. The tested loader's public-download correspondence still requires verification.
+
 - Select a reproducible next composition after each verified full clear, using the game's native respawn manager and unchanged timer.
 - Add guarded, per-row reference writes without modifying shared composition vectors or requiring an overriding data package.
 - Persist the seed and per-camp counters outside game saves, with atomic readback and prepared-clear recovery.

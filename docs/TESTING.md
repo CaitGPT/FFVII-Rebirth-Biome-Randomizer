@@ -36,7 +36,7 @@ The owner subsequently specified runtime rerolling on each cleared-camp respawn 
 
 ## Automatic runtime acceptance in progress
 
-Twenty synthetic Lua 5.4 cases pass for the lifecycle policy, seed/cycle persistence, prepared-clear crash recovery, streaming rebind, defeat and conflicting writes. The native decoder also has a compiled argument regression. These are offline results.
+Twenty-three synthetic Lua 5.4 cases pass for the lifecycle policy, seed/cycle persistence, prepared-clear crash recovery, streaming rebind, defeat, preexisting/subsequent conflicting writes and initial population preflight. The native decoder also has a compiled argument regression. These are offline results.
 
 Automatic native2 used DLL SHA256 `669e9084d0268ddd89cc9517e4813722c6f3577850ea802d76d192771b41661d`, adapter SHA256 `566e8a45e3df58ffa043f5e85b4e30d7f867b21b8fc25bd0041fc5ab062cd2b5`, seed `613`, original game data, and the actual installed mod set. Our earlier data package triplet was removed to a verified backup. Owner checkpoint22 remained hash-identical throughout.
 
@@ -44,4 +44,8 @@ The adapter acquired the original exact three-member groups at05,23 and29. One O
 
 Fast travel to Oliver's Farm, the unchanged180-second native timer, and a return route produced exact fresh Mu1+Orc2 at05 at22:13:42. The adapter independently logged `spawn_observed` cycle1/choice1. Groups23 and29 retained their original Kalm Fang/Orc actors. No manual setter request was used. This passes one automatic native clear-to-respawn transition, including partial-clear/defeat rejection. The full recording `2026-11-04 21-48-59.mkv`, failed attempt, raw logs, state journals, response JSON and captures remain outside Git.
 
-Still required: nonzero-state restart/first-spawn timing; reverse/repeated transitions; living-group streaming without reroll; remaining arenas and broader pools; protected encounters, region transitions, mod conflicts, removal and the final [release QA gate](RELEASE-QA.md). No release acceptance or publication follows from this scoped pass.
+Automatic native3 additionally passed nonzero-state restart/first-spawn timing, living-group streaming through Kalm without a reroll, and the reverse Mu-to-Kalm clear/respawn at05. Its full recording is `2026-11-04 22-16-42.mkv`.
+
+Automatic native4 used strengthened adapter SHA256 `f899c084f75593b6ebbadb5536c2799259d9530adc734b54f88d8f9fed877fa5` with the same native DLL and seed13. All four row references were prepared at22:48:51 before groups05/23/29 appeared at22:48:58. A controlled route reached30; exact Mu3414HP/two Orcs6829HP identities matched its tracked group. The group cleared on Hard, with three native death records and only camp30 advancing to cycle1 at23:09:43. Leaving the arena and returning after the unchanged180-second timer produced exact fresh Kalm Fang/two Orc actors at23:13:52. A follow-up original-group battle was interrupted by test shutdown; its completion is not claimed, and the counter stayed1. Full recording `2026-11-04 22-41-00.mkv`, tested DLL/scripts, raw evidence, failures and state journals are retained outside Git.
+
+Still required: arena23 Mu completion; fresh-install automatic seed creation; representative protected encounters; removal and final [release QA](RELEASE-QA.md). Negative conflict/state cases must remain labelled offline unless separately tested natively. The first release is limited to the four reviewed level15 Grasslands camps; wider pools are future work. No publication follows from these scoped passes.

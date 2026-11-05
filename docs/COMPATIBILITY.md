@@ -39,3 +39,11 @@ Reinstalling the exact previously crashing Mandragora1+Orc2 table package with t
 At the owner's request, a separate diagnostic reduced camp05 to one level15 Mandragora. It changed only five frozen-array logical lengths, preserving the original asset size, all other rows and the same arena correction. The fight completed on Hard: native messages reported Mandragora defeated,188gil,1524EXP/3AP and a pearl ginger root; fresh telemetry and an inspected capture confirmed return to the field. Cloud remained901HP and received no healing/revival command. Difficulty and chapter were unchanged; the owner's checkpoint was preserved.
 
 This verifies cross-category spawning, active combat and single-enemy completion at05. It does not prove every same-category pair, other arenas, mixed-group completion or equal balance. [Experimental source and reproduction instructions](../experimental/arena-correction/README.md) are retained separately from the default package.
+
+## Conflicts with other mods
+
+The runtime requires the reviewed native Grasslands EnemyTerritory layout, exact name tokens and structural fingerprint. An overriding package that changes that table is incompatible and should be refused. Its own earlier fixed-seed package must be removed before enabling the runtime. The runtime also refuses a new asset whose selected references were already changed, or an unexpected reference change after initialization; it does not overwrite another runtime writer.
+
+The territory fingerprint does not validate another mod's changes to CharaSpec, movement/physique categories, AI, actor classes, rewards or arena point arrays. Mods changing the admitted enemies or those arena definitions require separate compatibility testing. Shared numeric categories alone do not establish compatibility. Do not advertise universal mod compatibility.
+
+The development smoke tests used the installed Training Dummy, Battle Meters and telemetry/navigation/card-game probes alongside this runtime. They observed ordinary camp completion, two automatic respawn directions, restart persistence and living-group re-entry at05. This is evidence for that pinned installation, not every version or combination. Protected-encounter, removal and other final checks remain governed by [release QA](RELEASE-QA.md).

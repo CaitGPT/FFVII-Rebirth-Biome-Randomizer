@@ -1,45 +1,69 @@
 # Player and build guide
 
-This is an unreleased prototype. Keep your original saves backed up. Native placement, completion and balance testing must pass before a player release.
+This is an unreleased runtime prototype. Final compatibility and removal acceptance are in progress; see [release QA](RELEASE-QA.md). The current pool covers four ordinary level-15 Grasslands camps, not the whole world.
 
-## Requirements
+## Runtime requirements
 
-- The supported PC game's own raw FModel exports: regional `EnemyTerritory` and `EnemyTerritoryMob`, plus resident `BattleCharaSpec` and `CharaSpec`, at the four paths recorded in `data/pools.json` under `End/Content/`.
-- Python 3.10 or later and the .NET 8 SDK for building. The Python tools use only the standard library; DataBuilder has no NuGet dependencies.
-- UnrealReZen for initial archive identity/directory construction, the owner's installed Oodle library for compression, and the game installation's IoStore files. The proprietary DLL is not included in this source repository.
+The tested native module uses UE4SS 3.0.1 Beta #0, commit `c0a8d4cb259dccb8d7b58aec8b89e51c97222f9b`. Its C++ ABI must match the loader. A newer UE4SS build is not automatically compatible. The reviewed game table must pass the full runtime fingerprint check; unknown tables disable substitution.
 
-The builder checks all four original table hashes against the reviewed catalog and stops on an unreviewed game version. Do not remove that check to force a different version to work. Re-export and inspect the data instead.
+The public Rebirth loader is [RE-UE4SS FF7R](https://www.nexusmods.com/finalfantasy7rebirth/mods/267?tab=files). It offers several game-version variants. The exact correspondence between these downloads and our tested local loader remains to be verified before release. Do not assume that an arbitrary variant is compatible. We do not redistribute the loader.
 
-## Generate a seed
+## Install
 
-Copy `tools/build-config.example.json` to `tools/build-config.local.json` and set your own export, game and tool paths. `oodle` points to the installed codec DLL; if omitted, the builder looks beside UnrealReZen for `oo2core_9_win64.dll`. Set `build_root` on the game's volume so the builder can create its vanilla-only archive view without copying the game's archives. The local file is ignored by Git. Run from the repository root:
+Close the game. Back up existing UE4SS configuration and any existing `BiomeRandomizerRuntime` folder. Retain normal save backups. The mod belongs beneath `End/Binaries/Win64/ue4ss/Mods/`:
+
+```text
+BiomeRandomizerRuntime/
+  dlls/main.dll
+  Scripts/main.lua
+  Scripts/automatic.lua
+  Scripts/lifecycle.lua
+  Scripts/state_store.lua
+  Scripts/biome_json.lua
+  Scripts/config.lua
+```
+
+Enable `BiomeRandomizerRuntime : 1` once in the existing `mods.txt`, preserving other entries. Compare installed hashes with the release manifest. No game assets, developer harness, request files or modified saves are required.
+
+Move our earlier `BiomeRandomizer_P.pak`, `.ucas` and `.utoc` triplet out of the active Paks directory to a verified backup first. That fixed-composition experiment conflicts with the runtime's original-table check. Never mix it with the runtime package.
+
+## Seed and respawns
+
+The default `Scripts/config.lua` is:
+
+```lua
+return { enabled=true, seed='auto' }
+```
+
+`auto` creates a random seed once and reuses it. To reproduce a sequence, set a chosen nonempty string, for example `'13'`, while the game is closed. A different explicit seed starts a new sequence. `'13'` and `'013'` differ. There is no in-game settings menu.
+
+State is separate from game saves: `%LOCALAPPDATA%/FFVIIRebirthBiomeRandomizer/state-v1.json`, with a previous-state backup. Preserve both when updating. Removing state deliberately resets the sequence; back it up first. Corrupt or incompatible state disables operation instead of silently resetting progress.
+
+The seed, camp ID and complete-clear counter select Kalm Fang/two Orcs or Mu/two Orcs. All three exact members must be verified dead and the party alive outside battle before a counter advances. The selection is ready for the game's next normal respawn. The original 180-second timer and normal streaming rules still apply. Revisit, load, defeat, retreat and unloading a living group do not advance a counter. The next random choice can repeat the current composition. State is global to this installation, not tied to one save slot.
+
+## Remove and diagnose
+
+Close the game, retain manifest/state backups, disable the single `BiomeRandomizerRuntime` entry and remove only its folder. Runtime changes vanish with the process. Keep UE4SS and other mods installed. The optional state folder can remain for reuse. Native removal acceptance is recorded separately in the QA report.
+
+Search `UE4SS.log` for `[BiomeRandomizerRuntime]`. `selector_ready`, `reference_ready`, `group_acquired`, `clear_committed` and `spawn_observed` describe different stages: a table write does not prove a spawn. `automatic_disabled` or `automatic stopped` means substitution has stopped. Preserve the log, version, seed and manifest with a bug report.
+
+Another mod editing regional EnemyTerritory data or its references is incompatible. The fingerprint does not validate other mods' enemy-stat, AI, movement, arena or reward changes. See [compatibility](COMPATIBILITY.md). Equal counts and levels do not establish equal difficulty.
+
+## Build from source
+
+Runtime source is in `runtime/Native` and `runtime/Scripts`. Build the DLL with MSVC 2022, CMake 3.22+ and the pinned loader's compatible interface/import library. CMake takes `INSTALLED_INTERFACE`, `UE4SS_SOURCE`, `UEPSEUDO_SOURCE`, `IMGUI_SOURCE`, `IMGUI_TEXT_EDIT_SOURCE`, `ZYDIS_SOURCE` and `UE4SS_IMPORT_LIB`. Development uses an interface snapshot prepared by the parent FFVII-Modding project's `Tools/ff7r-telemetry-exporter/Prepare-InstalledUe4ssInterface.py`. A portable, independently reproducible SDK recipe remains a release prerequisite; the local development script alone is not one.
+
+Run the Python tests in `runtime/tests` with Lua 5.4 and the compiled `RuntimeArgumentTests` executable. Synthetic results do not pass native acceptance cases.
+
+## Legacy fixed-package research
+
+The earlier package builder selects compositions at build time and does not implement reroll-on-respawn. Its seed algorithm differs from the runtime. It remains available for controlled comparisons.
+
+It requires the game's raw FModel exports at the four paths in `data/pools.json`, Python 3.10+, .NET 8, UnrealReZen, the owner's Oodle library and the game's IoStore files. Proprietary inputs are excluded from source/releases. Copy `tools/build-config.example.json` to ignored `tools/build-config.local.json` and configure local paths. From the repository root:
 
 ```powershell
 python tools/build.py --config tools/build-config.local.json --seed 44
-```
-
-This builds the source reader, exports read-only input data, and creates a plan and audit under `build/seed-<unique suffix>/`. It does not edit or install game assets. Inspect `audit.json` for each encounter's original and selected composition.
-
-```powershell
 python tools/build.py --config tools/build-config.local.json --seed 44 --execute --pack
 ```
 
-This writes and independently verifies the modified table, then packs and verifies the package triplet. The final files are in the directory named by `package_directory` in `audit.json` (currently `package-corrected/`). Intermediate packager output is retained for diagnosis and is not the installable result. `--execute` without `--pack` writes only the verified table. To produce the smallest diagnostic build, add `--only Grassland_mob_05`. The option refuses targets outside the explicit allowlist.
-
-A seed is a string: `44` and `044` are different seeds. The same seed, catalog and algorithm produce the same selected encounters. Different seeds can sometimes select the same composition at a particular encounter; there are two choices per encounter.
-
-For algorithmv2 and the reviewed catalog, seed3 selects Mu1+Orc2 at all four targets; seed6 selects the original Kalm Fang1+Orc2 at all four. Seed44 selects Mu at05/23 and Kalm Fang at29/30. These are build-plan expectations, not native acceptance receipts. Mandragora is currently excluded; see [the cross-category investigation](COMPATIBILITY.md).
-
-## Install and remove a tested package
-
-Close the game first. Back up any existing complete `BiomeRandomizer_P.pak`, `.ucas` and `.utoc` triplet and compare SHA-256 hashes. Copy the new complete triplet from the selected build's audited `package_directory` into `End/Content/Paks/~mods/`. Verify the installed hashes against `audit.json` before launching. Do not mix files from different builds or install intermediate output.
-
-To remove the prototype, close the game, retain a backup, and remove only its three named files. Restore an earlier package only from its own verified complete triplet. Other mods are independent and should remain installed.
-
-The encounter mapping is part of the installed package. Restart the game after changing seeds. There is no runtime seed setting, UI, Lua component, or UE4SS dependency for this mod itself.
-
-## Compatibility
-
-This package replaces `DataObject/Field/1200-GRASA/EnemyTerritory.uasset`. Another mod replacing that asset conflicts even if it edits different rows. Load order does not merge tables. The installed Training Dummy mod replaces Resident tables instead; that asset-path comparison is not a complete native compatibility test.
-
-Enemy level and count preservation does not make the two species identical in difficulty. The initial pool deliberately changes only one small ground enemy and leaves the two Orcs fixed. Story progression, other regions and higher-level variants are outside this prototype's scope.
+The first command creates a read-only plan/audit. The second writes and independently verifies a package. Only the complete triplet in the audited `package_directory` is installable. Keep intermediate outputs for diagnosis. `--only Grassland_mob_05` restricts the experiment to that allowlisted camp. Never install this research package alongside the runtime.

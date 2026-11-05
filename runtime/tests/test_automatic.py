@@ -157,4 +157,36 @@ class Adapter(unittest.TestCase):
             assert(fresh.fault and #native_writes==0)
         ''')
 
+    def test_synchronous_endplay_resolves_owned_actor_and_preserves_death(self):
+        self.run_case('''
+            local original_find=StaticFindObject
+            for index,a in ipairs(rows) do a.id='EN /Game/Level/Game/EndGame.EndGame:PersistentLevel.Enemy'..index end
+            function StaticFindObject(path)
+                for _,a in pairs(map) do if a.id:match('^[^ ]+ (.+)$')==path then return a end end
+                return original_find(path)
+            end
+            auto=Automatic.new({enabled=true,seed='613'});auto:step();battle_active=true
+            for _,a in ipairs(rows) do
+                kill(a);auto:end_play_name(a.id,0);map[a.name]=nil
+            end
+            battle_active=false;auto:step()
+            assert(not auto.fault and json.decode(disk).cycles.Grassland_mob_05.cycle==1)
+        ''')
+
+    def test_synchronous_endplay_ignores_unload_and_unowned_actor(self):
+        self.run_case('''
+            for _,a in ipairs(rows) do kill(a);auto:end_play_name(a.id,4) end
+            auto:end_play_name('EN /Game/Level/Game/EndGame.EndGame:PersistentLevel.Unowned',0)
+            map={};auto:step();assert(not auto.fault and #native_writes==0)
+            assert(json.decode(disk).cycles.Grassland_mob_05.cycle==0)
+        ''')
+
+    def test_early_territory_callback_prepares_before_population(self):
+        self.run_case('''
+            map={};disk='';native_writes={}
+            auto=Automatic.new({enabled=true,seed='13'});auto:territory_begin()
+            assert(not auto.fault and #native_writes==4)
+            for _,choice in ipairs(choices) do assert(choice==1) end
+        ''')
+
 if __name__=='__main__':unittest.main()

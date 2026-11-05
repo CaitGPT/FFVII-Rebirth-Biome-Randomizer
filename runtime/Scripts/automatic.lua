@@ -249,6 +249,14 @@ function M.new(config)
         end)
         if not ok then fail(error_value) end
     end
+    function self:territory_begin()
+        if self.fault or config.enabled~=true or not BiomeRandomizerIsGameThread() then return end
+        local ok,error_value=pcall(function()
+            local object=asset();if not valid(object) then return end
+            initialize();prepare_references(object,table_status(object))
+        end)
+        if not ok then fail(error_value) end
+    end
     function self:begin_play(context)
         if self.fault or config.enabled~=true or type(BiomeRandomizerIsGameThread)~='function' or not BiomeRandomizerIsGameThread() then return end
         local ok,error_value=pcall(function()
@@ -277,6 +285,13 @@ function M.new(config)
             if type(value.hp)=='number' and type(value.max_hp)=='number' then death(owner.camp,value,'end_play_destroyed') end
         end)
         if not ok then fail(error_value) end
+    end
+    function self:end_play_name(id,reason)
+        if self.fault or not self.policy or reason~=0 or type(id)~='string' or not self.owned[id] or not BiomeRandomizerIsGameThread() then return end
+        local owner=self.owned[id]
+        local path=id:match('^[^ ]+ (.+)$');if not path then return end
+        local actor=resolve(path);if not valid(actor) or actor:GetFullName()~=id then return end
+        self:end_play({get=function() return actor end},reason)
     end
     return self
 end
