@@ -28,18 +28,15 @@ local function emit(event,fields)
     print('[BiomeRandomizerRuntime] '..json.encode(fields)..'\n')
 end
 function M.new(config)
-    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},engine_path=nil,asset_scan_at=0}
+    local self={fault=nil,policy=nil,store=nil,epoch=nil,owned={},engine_path=nil}
     local function fail(reason)
         if not self.fault then self.fault=tostring(reason);emit('automatic_disabled',{reason=self.fault}) end
     end
     local function asset()
+        -- Exact path lookups only. Outside the Grasslands this asset may not be
+        -- loaded, and a FindAllOf fallback would stall the game thread each time.
         local object=resolve(asset_path)
         if valid(object) and object:GetFullName()==asset_full then return object end
-        if os.time()<=self.asset_scan_at then return nil end
-        self.asset_scan_at=os.time()
-        for _,candidate in ipairs(FindAllOf('EndDataObjectEnemyTerritory') or {}) do
-            if valid(candidate) and candidate:GetFullName()==asset_full then return candidate end
-        end
     end
     local function pawn()
         local engine=self.engine_path and resolve(self.engine_path)

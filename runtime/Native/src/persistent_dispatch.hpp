@@ -34,6 +34,7 @@ class PersistentDispatch {
         bool alive{true},dispatching{},fault{};
         unsigned long long calls{};
         double max_ms{};
+        double total_ms{};
         Clock::time_point next{},refresh{};
         RC::Unreal::FName begin,end;
         // The installed SDK spells FName as class; the historical headers
@@ -87,10 +88,15 @@ class PersistentDispatch {
                 lua->call_function("BiomeRandomizerTick",0,0);
                 const auto elapsed=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
                 if(elapsed>shared->max_ms) shared->max_ms=elapsed;
+                shared->total_ms+=elapsed;
                 ++shared->calls;
-                if(shared->calls==1 || shared->calls%6000==0)
-                    log("persistent calls="+std::to_string(shared->calls)+" thread="+std::to_string(GetCurrentThreadId())+
+                // One line every five minutes, so a bug report shows the cost.
+                if(shared->calls==1 || shared->calls%3000==0) {
+                    const auto window=shared->calls==1?1ull:3000ull;
+                    log("persistent calls="+std::to_string(shared->calls)+" avg_ms="+std::to_string(shared->total_ms/window)+
                         " max_ms="+std::to_string(shared->max_ms));
+                    shared->total_ms=0;shared->max_ms=0;
+                }
                 shared->next=Clock::now()+std::chrono::milliseconds(100);
             }
         } catch(const std::exception& error) {

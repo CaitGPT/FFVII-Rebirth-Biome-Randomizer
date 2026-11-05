@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include "reviewed_layout.hpp"
 #include "write_arguments.hpp"
 #include "persistent_dispatch.hpp"
@@ -251,7 +252,7 @@ int inspect(const RC::LuaMadeSimple::Lua& lua) {
 class Runtime : public RC::CppUserModBase {
     PersistentDispatch dispatch{window_thread};
 public:
-    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.0");ModAuthors=STR("Codex");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
+    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.0");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
     void on_unreal_init() override { dispatch.install(); }
     void on_update() override { dispatch.activate(); }
     void on_lua_stop(RC::StringViewType name,RC::LuaMadeSimple::Lua&,RC::LuaMadeSimple::Lua&,
@@ -276,5 +277,30 @@ public:
     }
 };
 }
-extern "C" __declspec(dllexport) RC::CppUserModBase* start_mod() { return new Runtime(); }
+#ifndef BIOME_TESTED_LOADER_SHA256
+#define BIOME_TESTED_LOADER_SHA256 "3f5e8d934fe91ff26be2ce3585cef0940d3c73b40295adc09fa6e7b62bc0018f"
+#endif
+namespace {
+// This DLL is compiled against one exact UE4SS C++ ABI. A different build can
+// still satisfy the imports while laying out classes differently, so compare
+// the running loader before touching anything from its interface. Win32 only:
+// UE4SS copes with a null mod, and main.lua reports the missing functions.
+bool tested_loader() noexcept {
+    try {
+        const HMODULE module=GetModuleHandleW(L"UE4SS.dll");
+        if(!module) return false;
+        wchar_t path[MAX_PATH*2]{};
+        const auto length=GetModuleFileNameW(module,path,MAX_PATH*2);
+        if(!length || length>=MAX_PATH*2) return false;
+        std::ifstream file(std::filesystem::path(path),std::ios::binary);
+        if(!file) return false;
+        const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
+        return !bytes.empty() && digest(bytes)==BIOME_TESTED_LOADER_SHA256;
+    } catch(...) {return false;}
+}
+}
+extern "C" __declspec(dllexport) RC::CppUserModBase* start_mod() {
+    if(!tested_loader()) return nullptr;
+    return new Runtime();
+}
 extern "C" __declspec(dllexport) void uninstall_mod(RC::CppUserModBase* mod) { delete mod; }
