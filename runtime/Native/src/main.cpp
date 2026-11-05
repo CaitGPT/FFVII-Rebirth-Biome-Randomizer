@@ -286,23 +286,25 @@ int state_write_failed_status(const RC::LuaMadeSimple::Lua& lua) {
 int is_game_thread(const RC::LuaMadeSimple::Lua& lua) {
     const auto thread=window_thread();lua.set_bool(thread!=0 && thread==GetCurrentThreadId());return 1;
 }
-int set_next(const RC::LuaMadeSimple::Lua& lua) {
-    try {
-        const auto arguments=consume_write_arguments(lua);
-        const auto address=arguments.address;const auto table_index=static_cast<std::size_t>(arguments.table);
-        const auto target=static_cast<std::size_t>(arguments.target);
-        if(uncertain_write) throw std::runtime_error("uncertain_write_latched");
-        const auto before=validate(address,table_index);
-        const auto& reviewed_table=reviewed::tables[table_index];
-        if(target>=reviewed_table.target_count) throw std::runtime_error("invalid_selection");
-        const auto& reviewed_target=reviewed_table.targets[target];
-        if(before.choices[target]!=arguments.expected) throw std::runtime_error("stale_expected_selection");
-        if(arguments.expected==arguments.desired) {lua.set_string(status_json(before));return 1;}
-        const auto content=before.content;
+struct Change {std::size_t target;std::string expected,desired;};
+// Every requested change to one table, validated once before and once after: each full check reads the
+// whole table and looks up every name in it, which cost about 5 ms a camp when done camp by camp.
+std::string apply_changes(std::uintptr_t address,std::size_t table_index,const std::vector<Change>& changes) {
+    if(uncertain_write) throw std::runtime_error("uncertain_write_latched");
+    const auto before=validate(address,table_index);
+    const auto& reviewed_table=reviewed::tables[table_index];
+    const auto content=before.content;
+    auto wanted_bytes=before.bytes;auto wanted_choices=before.choices;
+    std::vector<std::pair<std::uint32_t,std::uint64_t>> writes;
+    for(const auto& change:changes) {
+        if(change.target>=reviewed_table.target_count) throw std::runtime_error("invalid_selection");
+        const auto& reviewed_target=reviewed_table.targets[change.target];
+        if(before.choices[change.target]!=change.expected) throw std::runtime_error("stale_expected_selection");
+        if(change.expected==change.desired) continue;
         std::uintptr_t enemies_at=content+reviewed_target.template_original;
         std::uintptr_t low_at=content+reviewed_target.min_original,high_at=content+reviewed_target.max_original;
-        if(arguments.desired!="o") {
-            const auto wanted=parse(arguments.desired,reviewed_target.slots);
+        if(change.desired!="o") {
+            const auto wanted=parse(change.desired,reviewed_target.slots);
             std::vector<unsigned char> names(8*reviewed_target.slots),counts(reviewed_target.slots);
             for(std::uint32_t s=0;s<reviewed_target.slots;++s) {
                 const auto enemy=wanted.enemies[s];const auto count=wanted.counts[s];
@@ -316,32 +318,67 @@ int set_next(const RC::LuaMadeSimple::Lua& lua) {
             enemies_at=reinterpret_cast<std::uintptr_t>(owned("T"+std::to_string(table_index)+":"+joined(wanted.enemies),names));
             low_at=high_at=reinterpret_cast<std::uintptr_t>(owned("C:"+joined(wanted.counts),counts));
         }
-        const std::array<std::pair<std::uint32_t,std::uint64_t>,3> writes{{
+        for(const auto& write:std::array<std::pair<std::uint32_t,std::uint64_t>,3>{{
             {reviewed_target.descriptor,relative_to(content+reviewed_target.descriptor,enemies_at)},
             {reviewed_target.min_descriptor,relative_to(content+reviewed_target.min_descriptor,low_at)},
-            {reviewed_target.max_descriptor,relative_to(content+reviewed_target.max_descriptor,high_at)}}};
-        auto wanted_bytes=before.bytes;
-        for(const auto& [offset,value]:writes) {
-            const auto pointer=content+offset;
-            MEMORY_BASIC_INFORMATION region{};
-            if(!VirtualQuery(reinterpret_cast<void*>(pointer),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
-               !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
-               pointer+8>reinterpret_cast<std::uintptr_t>(region.BaseAddress)+region.RegionSize)
-                throw std::runtime_error("destination_not_writable_data");
-            std::memcpy(wanted_bytes.data()+offset,&value,8);
+            {reviewed_target.max_descriptor,relative_to(content+reviewed_target.max_descriptor,high_at)}}}) {
+            writes.push_back(write);
+            std::memcpy(wanted_bytes.data()+write.first,&write.second,8);
         }
-        // These change this row's own pointers, never a shared list. Keep the latch set
-        // unless exact full-image readback succeeds.
-        uncertain_write=true;
-        for(const auto& [offset,value]:writes) {
-            SIZE_T written{};
-            if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(content+offset),&value,8,&written) || written!=8)
-                throw std::runtime_error("write_uncertain");
+        wanted_choices[change.target]=change.desired;
+    }
+    if(writes.empty()) return status_json(before);
+    for(const auto& [offset,value]:writes) {
+        const auto pointer=content+offset;
+        MEMORY_BASIC_INFORMATION region{};
+        if(!VirtualQuery(reinterpret_cast<void*>(pointer),&region,sizeof(region)) || region.State!=MEM_COMMIT ||
+           !(region.Protect&(PAGE_READWRITE|PAGE_WRITECOPY)) || (region.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+           pointer+8>reinterpret_cast<std::uintptr_t>(region.BaseAddress)+region.RegionSize)
+            throw std::runtime_error("destination_not_writable_data");
+    }
+    // These change rows' own pointers, never a shared list. Keep the latch set unless exact
+    // full-image readback succeeds.
+    uncertain_write=true;
+    for(const auto& [offset,value]:writes) {
+        SIZE_T written{};
+        if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(content+offset),&value,8,&written) || written!=8)
+            throw std::runtime_error("write_uncertain");
+    }
+    const auto after=validate(address,table_index);
+    if(after.content!=before.content || after.bytes!=wanted_bytes || after.choices!=wanted_choices)
+        throw std::runtime_error("write_readback_differs");
+    uncertain_write=false;
+    return status_json(after);
+}
+int set_next(const RC::LuaMadeSimple::Lua& lua) {
+    try {
+        const auto arguments=consume_write_arguments(lua);
+        lua.set_string(apply_changes(arguments.address,static_cast<std::size_t>(arguments.table),
+            {{static_cast<std::size_t>(arguments.target),arguments.expected,arguments.desired}}));
+    } catch(const std::exception& error) {
+        lua.set_string(std::string("{\"ok\":false,\"reason\":\"")+error.what()+"\",\"uncertain_write\":"+(uncertain_write?"true":"false")+"}");
+    }
+    return 1;
+}
+// Arguments: table address, table index, and "target|expected|desired" lines joined by ";".
+int set_many(const RC::LuaMadeSimple::Lua& lua) {
+    try {
+        if(!lua.is_integer(1) || !lua.is_integer(2) || !lua.is_string(3)) throw std::runtime_error("invalid_argument_types");
+        const auto address=static_cast<std::uintptr_t>(lua.get_integer(1));
+        const auto table=static_cast<std::size_t>(lua.get_integer(1));
+        const std::string spec(lua.get_string(1));
+        if(spec.size()>65536) throw std::runtime_error("invalid_selection");
+        std::vector<Change> changes;
+        std::size_t at=0;
+        while(at<spec.size()) {
+            auto end=spec.find(';',at);if(end==std::string::npos) end=spec.size();
+            const auto line=spec.substr(at,end-at);
+            const auto a=line.find('|'),b=line.find('|',a==std::string::npos?0:a+1);
+            if(a==std::string::npos || b==std::string::npos || a==0 || line.find_first_not_of("0123456789")!=a) throw std::runtime_error("invalid_selection");
+            changes.push_back({static_cast<std::size_t>(std::stoul(line.substr(0,a))),line.substr(a+1,b-a-1),line.substr(b+1)});
+            at=end+1;
         }
-        const auto after=validate(address,table_index);
-        if(after.content!=before.content || after.bytes!=wanted_bytes || after.choices[target]!=arguments.desired)
-            throw std::runtime_error("write_readback_differs");
-        uncertain_write=false;lua.set_string(status_json(after));
+        lua.set_string(apply_changes(address,table,changes));
     } catch(const std::exception& error) {
         lua.set_string(std::string("{\"ok\":false,\"reason\":\"")+error.what()+"\",\"uncertain_write\":"+(uncertain_write?"true":"false")+"}");
     }
@@ -459,6 +496,7 @@ public:
             state.register_function("BiomeRandomizerSpawnStats",spawn_stats);
             state.register_function("BiomeRandomizerTableStatus",table_status);
             state.register_function("BiomeRandomizerSetNext",set_next);
+            state.register_function("BiomeRandomizerSetMany",set_many);
             state.register_function("BiomeRandomizerSHA256",hash_text);
             state.register_function("BiomeRandomizerRandomSeed",random_seed);
             state.register_function("BiomeRandomizerReadState",read_state);

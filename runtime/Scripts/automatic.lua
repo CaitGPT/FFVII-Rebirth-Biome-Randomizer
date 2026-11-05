@@ -148,18 +148,23 @@ function M.new(config)
             for target=1,#entry.camps do assert(status.choices[target]=='o','preexisting_reference_change') end
         end
         self.tokens[index]=token;self.loaded[index]=object
-        local changed=0;local waiting=0
+        local changed=0;local waiting=0;local lines={};local wanted={}
         local current={};for target=1,#entry.camps do current[target]=status.choices[target] end
         for target,camp in ipairs(entry.camps) do
             local desired=choice_of(camp.id,self.store.cycles[camp.id].cycle)
             if desired~=current[target] then
                 if BiomeRandomizerSpawnReady(camp.id) then
-                    local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,current[target],desired))
-                    assert(result.ok and result.choices[target]==desired,'reference_unverified:'..tostring(result.reason))
-                    current[target]=desired;changed=changed+1
+                    lines[#lines+1]=(target-1)..'|'..current[target]..'|'..desired;wanted[target]=desired
                 else
                     waiting=waiting+1
                 end
+            end
+        end
+        if #lines>0 then
+            local result=json.decode(BiomeRandomizerSetMany(object:GetAddress(),index-1,table.concat(lines,';')))
+            assert(result.ok,'reference_unverified:'..tostring(result.reason))
+            for target,desired in pairs(wanted) do
+                assert(result.choices[target]==desired,'reference_unverified');current[target]=desired;changed=changed+1
             end
         end
         self.current[index]=current
@@ -176,15 +181,15 @@ function M.new(config)
         if not valid(object) then return 0 end
         local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
         if not status.ok then return 0 end
-        local restored=0
+        local lines={}
         for target=1,#entry.camps do
-            if status.choices[target]~='o' then
-                local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,status.choices[target],'o'))
-                assert(result.ok,'restore_unverified:'..tostring(result.reason))
-                status=result;restored=restored+1
-            end
+            if status.choices[target]~='o' then lines[#lines+1]=(target-1)..'|'..status.choices[target]..'|o' end
         end
-        return restored
+        if #lines>0 then
+            local result=json.decode(BiomeRandomizerSetMany(object:GetAddress(),index-1,table.concat(lines,';')))
+            assert(result.ok,'restore_unverified:'..tostring(result.reason))
+        end
+        return #lines
     end
     -- New spawn actors are filled by the poll itself; then their camps can change. Actors that have
     -- gone mean a level is unloading, so its tables go back to the original before the next one.

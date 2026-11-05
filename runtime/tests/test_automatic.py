@@ -84,6 +84,14 @@ function BiomeRandomizerSetNext(address,index,target,expected,desired)
     return json.encode({ok=true,choices=choices[index]})
 end
 function enemy(name) local a=actor(name,'EN-'..name);field_enemies[name]=a;return a end
+function BiomeRandomizerSetMany(address,index,spec)
+    local result
+    for target,expected,desired in spec:gmatch('(%d+)|([^|;]+)|([^;]+)') do
+        result=json.decode(BiomeRandomizerSetNext(address,index,tonumber(target),expected,desired))
+        if not result.ok then return json.encode(result) end
+    end
+    return json.encode(result)
+end
 polled={};spawn_ready={Grassland_mob_05=true,Grassland_mob_23=true,JunonArea_mob_01=true}
 auto=Automatic.new({enabled=true,seed='613'});auto:step();auto:step();auto:step();assert(not auto.fault,auto.fault)
 start_writes=#native_writes
