@@ -53,7 +53,7 @@ function BiomeRandomizerWriteState(value) disk=value;return true end
 function BiomeRandomizerWriteStateAsync(value) disk=value;return true end
 function BiomeRandomizerRandomSeed() return '613' end
 function BiomeRandomizerSpawnReady(camp) return spawn_ready[camp]==true end
-function BiomeRandomizerSpawnPrepare() end
+function BiomeRandomizerSpawnScan() scans=scans+1;return found_actors or 0 end
 function BiomeRandomizerSpawnReset() spawn_ready={} end
 function BiomeRandomizerSpawnStats() return '{}' end
 function BiomeRandomizerTableStatus(address,index) status_calls=status_calls+1;return json.encode({ok=true,asset_content=address,choices=choices[index]}) end
@@ -167,6 +167,21 @@ class Adapter(unittest.TestCase):
             pawn_gone=false;run:step()
             assert(not run.fault,run.fault);assert(run.loaded[1]);assert(#native_writes>first)
             BiomeRandomizerTableStatus=oldStatus
+        ''')
+
+    def test_every_load_puts_a_surviving_table_back_to_the_original(self):
+        # The table outlives the level, whose new spawn actors have empty lists.
+        self.run_case('''
+            local seed
+            for i=1,200 do
+                if pick(tostring(i),'Grassland_mob_05',0,4)~=0 then seed=tostring(i);break end
+            end
+            disk='';choices={[0]={0,0},[1]={0}};native_writes={}
+            local run=Automatic.new({enabled=true,seed=seed});run:step();assert(choices[0][1]~=0)
+            pawn_gone=true;for i=1,5 do run:step() end
+            assert(not run.fault,run.fault);assert(choices[0][1]==0 and choices[0][2]==0,'a changed row survived the load')
+            spawn_ready={Grassland_mob_05=true,Grassland_mob_23=true}
+            pawn_gone=false;run:step();assert(not run.fault,run.fault);assert(choices[0][1]~=0)
         ''')
 
     def test_another_writer_is_never_overwritten(self):

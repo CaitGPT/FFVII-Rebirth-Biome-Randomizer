@@ -22,6 +22,7 @@
 #include "write_arguments.hpp"
 #include "persistent_dispatch.hpp"
 #include "spawn_points.hpp"
+#include <Unreal/UObjectGlobals.hpp>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -295,14 +296,19 @@ int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
     lua.set_bool(spawn_ready.contains(std::wstring(camp.begin(),camp.end())));
     return 1;
 }
-int spawn_prepare(const RC::LuaMadeSimple::Lua& lua) {
-    // Called with one exact actor from a one-off scan, when BeginPlay wasn't seen for it.
+int spawn_scan(const RC::LuaMadeSimple::Lua& lua) {
+    // These actors don't report BeginPlay, so find them once they exist. Done here rather than in
+    // Lua, where a large result allocates a wrapper per object. Returns how many were found.
+    std::vector<RC::Unreal::UObject*> found;
     try {
-        auto* object=reinterpret_cast<RC::Unreal::UObject*>(static_cast<std::uintptr_t>(lua.get_integer(1)));
-        const auto full=object->GetFullName();
-        if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) prepare_spawn_actor(object,full);
+        RC::Unreal::UObjectGlobals::FindAllOf(STR("EndFieldEnemyTerritoryServerBuildActor"),found);
+        for(auto* object:found) {
+            const auto full=object->GetFullName();
+            if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) prepare_spawn_actor(object,full);
+        }
     } catch(...) {++spawn_refused;}
-    return 0;
+    lua.set_integer(static_cast<std::int64_t>(found.size()));
+    return 1;
 }
 int spawn_reset(const RC::LuaMadeSimple::Lua&) {spawn_ready.clear();return 0;}
 int spawn_stats(const RC::LuaMadeSimple::Lua& lua) {
@@ -324,7 +330,7 @@ public:
         if (name!=STR("BiomeRandomizerRuntime")) return;
         const auto add=[](RC::LuaMadeSimple::Lua& state) {
             state.register_function("BiomeRandomizerSpawnReady",spawn_is_ready);
-            state.register_function("BiomeRandomizerSpawnPrepare",spawn_prepare);
+            state.register_function("BiomeRandomizerSpawnScan",spawn_scan);
             state.register_function("BiomeRandomizerSpawnReset",spawn_reset);
             state.register_function("BiomeRandomizerSpawnStats",spawn_stats);
             state.register_function("BiomeRandomizerTableStatus",table_status);

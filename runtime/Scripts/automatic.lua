@@ -11,8 +11,8 @@ local tables=require('world_pools')
 local M={}
 local idle_seconds,battle_seconds=1,0.5
 local load_ticks=3 -- this many seconds with no player and no battle means a load or a scene
-local scan_retry_seconds=5
-local scan_tries=6
+local scan_retry_seconds=2
+local scan_tries=15
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -89,13 +89,12 @@ function M.new(config)
     local function choice_of(camp,cycle)
         return Lifecycle.selection(self.store.seed,camp,cycle,self.pools[camp],BiomeRandomizerSHA256)
     end
+    -- At most once per sweep: about 100 ms, and only ever just after a load.
     local function scan_spawn_actors()
-        -- BeginPlay normally prepares these. This is the one-off fallback, about 100 ms, only after a load.
-        local actors=FindAllOf('EndFieldEnemyTerritoryServerBuildActor') or {}
-        for _,actor in ipairs(actors) do
-            if valid(actor) then BiomeRandomizerSpawnPrepare(actor:GetAddress()) end
-        end
-        emit('spawn_scan',{found=#actors,spawn=json.decode(BiomeRandomizerSpawnStats())})
+        if self.scanned_this_sweep then return end
+        self.scanned_this_sweep=true
+        self.found_actors=BiomeRandomizerSpawnScan()
+        emit('spawn_scan',{found=self.found_actors,spawn=json.decode(BiomeRandomizerSpawnStats())})
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
@@ -114,14 +113,12 @@ function M.new(config)
             for target=1,#entry.camps do assert(status.choices[target]==0,'preexisting_reference_change') end
         end
         self.tokens[index]=token;self.loaded[index]=object
-        local scanned=false;local changed=0;local waiting=0
+        local changed=0;local waiting=0
         local current={};for target=1,#entry.camps do current[target]=status.choices[target] end
         for target,camp in ipairs(entry.camps) do
             local desired=choice_of(camp.id,self.store.cycles[camp.id].cycle)
             if desired~=current[target] then
-                if not BiomeRandomizerSpawnReady(camp.id) and not scanned then
-                    scanned=true;scan_spawn_actors()
-                end
+                if not BiomeRandomizerSpawnReady(camp.id) then scan_spawn_actors() end
                 if BiomeRandomizerSpawnReady(camp.id) then
                     local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,current[target],desired))
                     assert(result.ok and result.choices[target]==desired,'reference_unverified:'..tostring(result.reason))
@@ -134,6 +131,29 @@ function M.new(config)
         self.current[index]=current
         emit('table_ready',{region=entry.region,camps=#entry.camps,changed=changed,waiting=waiting,spawn=json.decode(BiomeRandomizerSpawnStats())})
         return waiting==0
+    end
+    -- A table can outlive the level that uses it. The next level rebuilds its spawn actors with
+    -- empty lists, so a changed row left behind could ask for a size that isn't there yet, which
+    -- crashes the game. So every load starts from the game's own references.
+    local function restore_tables()
+        local restored=0
+        for index,entry in ipairs(tables) do
+            local object=resolve(entry.asset)
+            if valid(object) then
+                local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
+                if status.ok then
+                    for target=1,#entry.camps do
+                        if status.choices[target]~=0 then
+                            local result=json.decode(BiomeRandomizerSetNext(object:GetAddress(),index-1,target-1,status.choices[target],0))
+                            assert(result.ok,'restore_unverified:'..tostring(result.reason))
+                            status=result;restored=restored+1
+                        end
+                    end
+                end
+            end
+            self.current[index]=nil;self.tokens[index]=nil
+        end
+        emit('tables_restored',{rows=restored})
     end
     local function party_alive(battle,party)
         local count=party:GetBattleMemberCount()
@@ -206,6 +226,7 @@ function M.new(config)
                 if self.pawnless>=load_ticks then
                     self.fight=nil;self.loaded={};self.pawn_address=nil;self.need_sweep=true;self.pending={}
                     self.retry_at=0;self.tries=0;BiomeRandomizerSpawnReset()
+                    if self.store then restore_tables() end
                 end
                 return
             end
@@ -222,6 +243,7 @@ function M.new(config)
             if self.fight then finish_fight(battle,party) end
             if now>=self.retry_at and (self.need_sweep or next(self.pending)) then
                 self.retry_at=now+scan_retry_seconds
+                self.scanned_this_sweep=false;self.found_actors=0
                 local again=false
                 for index,entry in ipairs(tables) do
                     if self.need_sweep or self.pending[entry.region] then
@@ -233,7 +255,8 @@ function M.new(config)
                 end
                 self.need_sweep=false
                 self.tries=(self.tries or 0)+1
-                if not again or self.tries>=scan_tries then self.pending={} end
+                -- Once the actors exist, a camp still waiting simply has none, so stop looking.
+                if not again or self.tries>=scan_tries or self.found_actors>0 then self.pending={} end
             end
         end)
         if not ok then fail(error_value) end

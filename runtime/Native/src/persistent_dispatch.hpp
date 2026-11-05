@@ -44,7 +44,8 @@ class PersistentDispatch {
         double max_gap{};
 #endif
         Clock::time_point next{},refresh{};
-        RC::Unreal::FName begin;
+        RC::Unreal::FName begin,end;
+        bool exiting{};
         // The installed SDK spells FName as class; the historical headers
         // spell it struct, changing this getter's mangled return type.
         using NameGetter=const RC::Unreal::FName& (*)(const RC::Unreal::UObject*);
@@ -83,14 +84,22 @@ class PersistentDispatch {
         }
 #endif
         std::unique_lock guard(shared->mutex,std::try_to_lock);
-        if(!guard || !shared->alive || shared->fault || shared->dispatching ||
+        if(!guard || !shared->alive || shared->fault || shared->dispatching || shared->exiting ||
            !shared->current || !shared->thread || GetCurrentThreadId()!=shared->thread) return;
+        const auto called=shared->name(reinterpret_cast<RC::Unreal::UObject*>(function));
+        // The engine ends every actor with reason Quit when the game shuts down. Calling into the
+        // game after that crashes it, so this latch stops all our work for good.
+        if(called==shared->end && parameters) {
+            unsigned char reason{};SIZE_T copied{};
+            if(ReadProcessMemory(GetCurrentProcess(),parameters,&reason,1,&copied) && copied==1 && reason==4) {
+                shared->exiting=true;return;
+            }
+        }
         auto* lua=shared->current;
         const int top=lua->get_stack_size();
         shared->dispatching=true;
         try {
-            const auto name=shared->name(reinterpret_cast<RC::Unreal::UObject*>(function));
-            if(name==shared->begin && actor) {
+            if(called==shared->begin && actor) {
                 const auto full=actor->GetFullName();
                 if(full.starts_with(L"EndFieldEnemyTerritoryServerBuildActor ")) {
                     if(shared->spawn_actor) shared->spawn_actor(actor,full);
@@ -150,6 +159,7 @@ public:
             "?GetNamePrivate@UObjectBase@Unreal@RC@@QEBAAEBVFName@23@XZ"));
         if(!state->name){state->fault=true;log("pinned name getter unavailable; stopped");return;}
         state->begin=RC::Unreal::FName(L"ReceiveBeginPlay",RC::Unreal::FNAME_Find);
+        state->end=RC::Unreal::FName(L"ReceiveEndPlay",RC::Unreal::FNAME_Find);
         auto shared=state;
         RC::Unreal::Hook::RegisterProcessEventPreCallback([shared](auto* a,auto* f,void* p){dispatch(shared,a,f,p);});
     }
