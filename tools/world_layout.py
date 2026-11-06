@@ -141,7 +141,7 @@ def report_flags(resident: Path) -> dict:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("field_root", type=Path); ap.add_argument("census", type=Path); ap.add_argument("repo", type=Path)
-    ap.add_argument("--resident", type=Path, default=Path(r"D:/FF7RebirthModding/DataTableIndex/Input/Resident"),
+    ap.add_argument("--resident", type=Path, required=True,
                     help="folder with the exported Hub.csv and WorldReport.csv")
     args = ap.parse_args()
     census = list(csv.DictReader(args.census.open(encoding="utf-8")))

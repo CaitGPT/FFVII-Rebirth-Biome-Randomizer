@@ -80,6 +80,11 @@ normal the next time it starts. Your saves were never changed. You can also dele
   around afterwards costs nothing noticeable.
 - **Odd-looking camps.** Any size of enemy can turn up in any camp of its region, so a big enemy can end up in a tight
   spot. In our tests they spawned and fought normally.
+- **Variants are common once several are unlocked.** An unlocked variant is as likely as any ordinary enemy, so with
+  four or five unlocked in a region, more than half of its camps can have at least one. Two assignments add nothing:
+  Cosmo Canyon's Griffin flies and the region has no flying camps, and Gongaga's Heavy Tank isn't a variant of a camp enemy.
+- **Running away counts as a fight.** If you run from a camp and later fight the survivors, that's a second fight, and
+  the camp moves on again. You'll never see the roll it skipped.
 - **Other mods that change the camp tables** (`EnemyTerritory` in any region) clash with this one. The mod checks each
   table's fingerprint and leaves a table it doesn't recognise alone, so it fails safe rather than mixing.
 - **The game sometimes shows a fatal error when you quit.** We checked: with this mod alone the game exits cleanly.

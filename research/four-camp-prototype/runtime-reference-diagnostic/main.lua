@@ -1,5 +1,5 @@
 -- Explicit bounded table-reference experiment. This is not a randomizer yet.
-local root='D:/FF7RebirthModding/Mods/BiomeRandomizer/native-20261104/'
+local root='C:/path/to/evidence/' -- where request and response files went in the original tests
 local path='EndDataObjectEnemyTerritory /Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory'
 local queued=false
 local function table_request()
