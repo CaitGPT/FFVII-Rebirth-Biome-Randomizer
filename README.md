@@ -7,6 +7,8 @@ An AI coding agent built this mod: Codex started it, Claude (Anthropic's model, 
 owner set the goals and judged the results. The [testing notes](docs/TESTING.md) say what was tried in the real game
 and what wasn't.
 
+[Download v1.0.0](https://github.com/AW1KSwinton/FFVII-Rebirth-Biome-Randomizer/releases/tag/v1.0.0) · [Watch the demonstration and build story](https://www.youtube.com/watch?v=_2Okhf8-NwM)
+
 ## What it does
 
 - **210 open-world camps** in the Grasslands, Junon, Corel, Gongaga, Cosmo Canyon, Nibelheim and the Midgar outskirts.
