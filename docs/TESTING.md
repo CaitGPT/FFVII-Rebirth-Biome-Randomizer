@@ -63,3 +63,9 @@ Measured with a diagnostic build that logs every mod tick over 50 ms and times e
 The first four-camp version passed clear-to-respawn in both directions, restart persistence and living-group streaming at camp
 05, and found the transient Lua-state failure that led to the persistent dispatcher. Those notes are in
 [the research folder](../research/README.md).
+
+## Owner playtest, 2026-11-06
+
+The owner reports also playtesting the mod in Corel. This is additional human playtesting, separate from the
+agent-run results above. Individual camps, fight counts and respawn outcomes were not recorded in that report;
+it does not mark the earlier two-fight agent test as completed.

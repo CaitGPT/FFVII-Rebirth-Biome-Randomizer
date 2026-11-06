@@ -35,8 +35,9 @@ a seed.
 
 - Unlocked assignment fiends belong to the install, not the save: loading an older save doesn't lock them again.
 - Loading a save takes up to half a second longer while the mod sets up the camp tables, behind the loading screen.
-- Tested on the Grasslands, Gongaga and the regions' tables; respawns in Corel, Cosmo Canyon, Junon and Nibelheim haven't
-  been watched in play yet. See [testing](docs/TESTING.md).
+- Agent play tests covered the Grasslands and Gongaga; the owner also playtested Corel. The owner's Corel report
+  does not specify individual cases. Respawns in Cosmo Canyon, Junon and Nibelheim have not been watched in play by us.
+  See [testing](docs/TESTING.md).
 - Mixes can be harder than the camp they replace, and big enemies can turn up in tight spots. That's the point, but
   expect the odd strange-looking camp.
 
