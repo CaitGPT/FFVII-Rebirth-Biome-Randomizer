@@ -10,7 +10,7 @@ The original table's serializer round-trip reproduced its bytes exactly. The sou
 
 The inherited build recipe overwrote the first ten UCAS bytes with bytes from a vanilla container. In these archives the first bytes belong to a compressed container-header block. Independent decompression failed on that block after the overwrite, while the asset block still decompressed correctly. The build now preserves the packager's block data and decompresses every block during verification.
 
-This recipe came from the owner's [Training Dummy build script](https://github.com/AW1KSwinton/FFVII-Rebirth-Training-Dummy/blob/main/tools/Build-TrainingDummy.ps1). Training Dummy's previously observed native behavior is separate evidence; this investigation does not claim that it cannot work. No installed Training Dummy files were changed.
+This recipe came from the owner's [Training Dummy build script](https://github.com/CaitGPT/FFVII-Rebirth-Training-Dummy/blob/main/tools/Build-TrainingDummy.ps1). Training Dummy's previously observed native behavior is separate evidence; this investigation does not claim that it cannot work. No installed Training Dummy files were changed.
 
 ## Duplicate chunks during rebuilds
 
