@@ -335,6 +335,19 @@ class Adapter(unittest.TestCase):
             assert(finds==0,'restore looked things up: '..finds)
         ''')
 
+    def test_a_table_found_once_is_reused_on_a_later_visit(self):
+        self.run_case('''
+            for i=1,10 do auto:step() end
+            local path='/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory'
+            local before=found_paths[path]
+            spawn_ready={};for i=1,3 do auto:step() end
+            assert(choices[0][1]=='o','not restored on leaving')
+            spawn_ready={Grassland_mob_05=true,Grassland_mob_23=true};for i=1,5 do auto:step() end
+            assert(not auto.fault,auto.fault)
+            assert(found_paths[path]==before,'looked the table up again on the second visit')
+            assert(choices[0][1]~='o','camps not changed on the second visit')
+        ''')
+
     def test_save_flags_are_read_once_per_load(self):
         self.run_case('''
             spawn_ready.Grassland_mob_99=true;flag_reads=0
@@ -345,7 +358,7 @@ class Adapter(unittest.TestCase):
             assert(flag_reads>0,'flags not read after leaving a level')
         ''')
 
-    def test_a_slow_step_reports_its_parts_at_most_every_five_seconds(self):
+    def test_a_slow_step_reports_its_parts_at_most_once_a_second(self):
         self.run_case('''
             local ms=0;BiomeRandomizerClockMs=function() return ms end
             local status=BiomeRandomizerTableStatus
@@ -359,7 +372,7 @@ class Adapter(unittest.TestCase):
             end
             assert(#reports>=1,'no slow_step report')
             assert(reports[1].ms>=150 and reports[1].parts.table_check>=150,'table check not named: '..json.encode(reports[1]))
-            -- The fake clock moves ten seconds a call, so every slow step here is over five seconds apart.
+            -- The fake clock moves ten seconds a call, so every slow step here is over a second apart.
         ''')
 
     def test_a_load_or_shutdown_stops_touching_the_game(self):

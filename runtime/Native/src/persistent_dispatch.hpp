@@ -109,11 +109,11 @@ class PersistentDispatch {
                 shared->nested=0;
                 lua->call_function("BiomeRandomizerTick",0,0);
                 const auto elapsed=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
-                // Every build: a tick over 100 ms is logged at once (at most one line in 5 s), so a report
+                // Every build: a tick over 100 ms is logged at once (at most one line a second), so a report
                 // shows when it happened. The Lua side logs which part of the tick took the time.
                 if(elapsed>100) {
                     const auto at=Clock::now();
-                    if(at-shared->slow_logged>=std::chrono::seconds(5)) {
+                    if(at-shared->slow_logged>=std::chrono::seconds(1)) {
                         log("slow_tick ms="+std::to_string(elapsed)+" nested_events="+std::to_string(shared->nested)+
                             " unlogged_since_last="+std::to_string(shared->slow_unlogged));
                         shared->slow_logged=at;shared->slow_unlogged=0;

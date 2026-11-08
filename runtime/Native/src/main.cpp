@@ -30,6 +30,12 @@
 
 namespace {
 std::string hex(const unsigned char* data, std::size_t size);
+// An 8-byte store into a page VirtualQuery has just shown committed and writable, guarded so a fault is a failed
+// write, not a crash. WriteProcessMemory did the same, but each call also flushed the instruction cache.
+bool store8(std::uintptr_t address,std::uint64_t value) noexcept {
+    __try {*reinterpret_cast<volatile std::uint64_t*>(address)=value;return true;}
+    __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
 bool read(std::uintptr_t address, void* output, std::size_t size) {
     SIZE_T copied{};
     return address > 0x10000 && size <= 65536 &&
@@ -347,9 +353,7 @@ std::string apply_changes(std::uintptr_t address,std::size_t table_index,const s
     // full-image readback succeeds.
     uncertain_write=true;
     for(const auto& [offset,value]:writes) {
-        SIZE_T written{};
-        if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(content+offset),&value,8,&written) || written!=8)
-            throw std::runtime_error("write_uncertain");
+        if(!store8(content+offset,value)) throw std::runtime_error("write_uncertain");
     }
     const auto after=validate(address,table_index);
     if(after.content!=before.content || after.bytes!=wanted_bytes || after.choices!=wanted_choices)

@@ -48,6 +48,19 @@ Measured with a diagnostic build that logs every mod tick over 50 ms and times e
 | Standing in the field, only this mod installed | No step over 15 ms in two minutes |
 | With the test harness's own mods loaded | Occasional 40–114 ms in the call that asks for the player. Not seen without the harness, so players won't have it |
 
+1.0.1, measured 2026-11-08 on slot 17 with the test harness loaded. Each run loaded the save, stood 2 minutes, fast travelled
+to Thresher Waterwheel and stood 1 minute. Stalls are the OBS monitor's game-thread measurement over the load.
+
+| Build | Load stalls | Our slow ticks |
+| --- | --- | --- |
+| Runtime off | 3.6 s, 12 over 100 ms, 1 over 250 ms | none |
+| First 1.0.1 candidate | 4.8 s, 16 over 100 ms, 3 over 250 ms | Grasslands table 586 ms; Midgar 103 ms (31 ms lookup, 66 ms writing) |
+| 1.0.1 | 3.6 s, 9 over 100 ms, 1 over 250 ms | No table preparation over 100 ms |
+
+The other slow ticks, in every build, were inside the single call that asks for the player, with up to 2,400 of other
+mods' game events run inside it (the harness's queued work). With the runtime off, the same work runs elsewhere: fast
+travel showed no extra stalls with the mod on. Players without the harness don't have it.
+
 ### Install, remove, quit
 
 | What | Result |

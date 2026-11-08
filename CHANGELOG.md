@@ -2,11 +2,13 @@
 
 ## 1.0.1 (not released yet)
 
-- Shorter stalls when camps load: only the tables of the camps that arrived are prepared, one table per tick, and each
-  table found is kept rather than looked up again. Before, every arrival looked up all seven tables by path, and debug
-  logs showed 350-470 ms ticks at loads with only this mod installed. Not yet measured in the game.
+- Shorter stalls when camps load: only the tables of the camps that arrived are prepared, one table per tick, and a
+  table found once is kept for the session rather than looked up again. Table rows are written with a guarded store
+  instead of `WriteProcessMemory`, which flushed the instruction cache on every write. Before, every arrival looked up
+  all seven tables by path: 350-590 ms ticks at loads. Measured on slot 17 (load, idle, one fast travel): no table
+  preparation over 100 ms, and the load's game-thread stalls matched a run with the mod off (3.6 s both).
 - Save records of won assignments are read once per load instead of at each camp arrival.
-- Any tick over 100 ms is logged at once (at most one line in 5 s) with how many game events ran inside it, and the
+- Any tick over 100 ms is logged at once (at most one line a second) with how many game events ran inside it, and the
   Lua logs a `slow_step` event naming which part took the time. Other mods' queued game-thread work can run inside this
   mod's game calls, so those parts can include time that isn't ours. Before, only the five-minute maximum was logged.
 - The SHA-256 provider is opened once instead of for every hash.

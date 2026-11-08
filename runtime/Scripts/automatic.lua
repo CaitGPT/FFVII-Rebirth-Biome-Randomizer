@@ -20,7 +20,7 @@ local repeat_tries=8
 -- until more of its camps arrive. Each failed lookup searches the game's objects, so it isn't free.
 local lookup_tries=4
 -- A step slower than this reports which of its parts took the time, at most once every slow_report_seconds.
-local slow_step_ms,slow_report_seconds=100,5
+local slow_step_ms,slow_report_seconds=100,1
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -56,7 +56,7 @@ end
 function M.new(config)
     local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},
         camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={},
-        pending_tables={},sections={},slow_reported_at=nil,slow_unreported=0}
+        pending_tables={},found={},sections={},slow_reported_at=nil,slow_unreported=0}
     -- Timing for the slow-step report: each lap adds the time since the last one to its part of the step.
     local clock=type(BiomeRandomizerClockMs)=='function' and BiomeRandomizerClockMs or nil
     local lap_at=0
@@ -151,14 +151,16 @@ function M.new(config)
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
-    -- The table object found when its camps arrived is kept and reused: looking a table up by its path
-    -- searches the game's objects, which cost hundreds of milliseconds when every table was looked up at each
-    -- arrival. The token check below still catches a table that was reloaded in its place.
+    -- A table object, once found, is kept for the session and reused while it's valid, including on later
+    -- visits: looking one up by its path took about 30 ms live, and every table at each arrival cost hundreds.
+    -- The identity check in the table status and the token below still catch a table reloaded in its place.
     local function prepare_table(index)
         local entry=tables[index]
         local object=self.loaded[index]
+        if not valid(object) then object=self.found[index] end
         if not valid(object) then object=resolve(entry.asset);lap('lookup') end
-        if not valid(object) then self.loaded[index]=nil;return nil end
+        if not valid(object) then self.loaded[index]=nil;self.found[index]=nil;return nil end
+        self.found[index]=object
         local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
         lap('table_check')
         if not status.ok then error('table_guard:'..entry.region..':'..tostring(status.reason)) end
