@@ -45,8 +45,6 @@ local pools={
         from_chapter={[5]={junon_elite_security}}},
     ['2200-CORLA:desert']={always=join(bandits,thugs)},
     ['2200-CORLA:southern']={always={security,grenadier,flame,slugray,scrutineye},chapter_select={elite_grenadier,slugray_g}},
-    ['2400-GONGA']={always=join(bandits,thugs)},
-    ['2500-CSMOA']={always=join(bandits,thugs)},
     ['2600-NIBLA']={always={security,grenadier,riot,flame,scrutineye,slugray,sweeper},chapter_select={operator,slugray_g}},
 }
 M.pools=pools
@@ -78,7 +76,8 @@ function M.unit_pool(unit,gates)
     return #out>0 and out or nil
 end
 function M.pool(region,camp,gates) return M.unit_pool(M.unit(region,camp),gates) end
--- The game spawns at most two squad enemy types it doesn't already load for the area: a camp naming a third
--- spawns nothing (live 2026-11-08). So squads use at most this many types among everything loaded at once.
-M.type_budget=2
+-- How many squad enemy types each region's table can use at once. Measured live (2026-11-08): past this, the
+-- first types a region's camps ask for spawn and any further type spawns nothing for the whole visit, whatever
+-- its size. The cause in the game isn't known. Corel's two halves share one table, so one type each.
+M.type_budget={['1100-MIDGA']=2,['1200-GRASA']=2,['1300-JUNOA']=2,['2200-CORLA']=2,['2600-NIBLA']=1}
 return M

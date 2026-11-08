@@ -186,10 +186,9 @@ function M.new(config)
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
-    -- The squad types each loaded unit uses this visit. The game spawns only a couple of squad enemy types it
-    -- doesn't load for the area itself, so the units loaded at once share that budget: one unit alone gets two
-    -- types, two at once (Corel's halves) one each, and a unit arriving with the budget spent gets none this visit
-    -- (its camps stay monsters). A Sweeper is never a unit's only type. Each visit draws a new set.
+    -- The squad types each unit uses this visit. A region's table spawns only so many squad enemy types it doesn't
+    -- load itself (squads.type_budget), so the units in one table share that number: Corel's two halves get one
+    -- each. A Sweeper is never a unit's only type. Each visit draws a new set.
     local function choose_types(unit,pool,count,visit)
         local left={};for _,v in ipairs(pool) do left[#left+1]=v end
         local out={}
@@ -211,14 +210,16 @@ function M.new(config)
         end
         if #fresh==0 then return end
         table.sort(fresh)
-        local used=0;for _,active in pairs(self.active_units) do used=used+#active.types end
-        local left=math.max(0,Squads.type_budget-used)
+        local used=0;for _,active in pairs(self.active_units) do if active.table==index then used=used+#active.types end end
+        local left=math.max(0,(Squads.type_budget[entry.region] or 0)-used)
         local each=left>=2*#fresh and 2 or (left>=#fresh and 1 or 0)
         for k,unit in ipairs(fresh) do
             local share=each>0 and each or (k<=left and 1 or 0)
             local pool=Squads.unit_pool(unit,self.gates) or {}
             local types={}
-            if share>0 and #pool>0 then types=choose_types(unit,pool,math.min(share,#pool),self.store:next_visit(unit)) end
+            local forced=type(config.squad_types)=='table' and config.squad_types[unit] -- testing only; not shipped
+            if forced then for _,v in ipairs(forced) do types[#types+1]=v end
+            elseif share>0 and #pool>0 then types=choose_types(unit,pool,math.min(share,#pool),self.store:next_visit(unit)) end
             self.active_units[unit]={types=types,table=index}
             local names={};for _,v in ipairs(types) do names[#names+1]=Squads.resident[v+1] end
             emit('squad_types',{unit=unit,types=names,budget_left=left})

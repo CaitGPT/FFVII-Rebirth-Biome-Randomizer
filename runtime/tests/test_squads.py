@@ -22,8 +22,9 @@ PLAN = {
     ('1300-JUNOA', 'JunonArea_mob_01'): ({J_SECURITY, J_GRENADIER, J_RIOT, SWEEPER, SLUGRAY}, {SLUGRAY_G}, {J_ELITE}),
     ('2200-CORLA', 'Corla_desert_mob_01'): (BANDITS | THUGS, set(), set()),
     ('2200-CORLA', 'Corla_southem_mob_01'): ({SECURITY, GRENADIER, FLAME, SLUGRAY, SCRUTINEYE}, {ELITE_GRENADIER, SLUGRAY_G}, set()),
-    ('2400-GONGA', 'Gongaga_west_mob_01'): (BANDITS | THUGS, set(), set()),
-    ('2500-CSMOA', 'Cosmo_mob_01'): (BANDITS | THUGS, set(), set()),
+    # Owner, 2026-11-08: no squads in Gongaga (a jungle) or Cosmo Canyon.
+    ('2400-GONGA', 'Gongaga_west_mob_01'): (set(), set(), set()),
+    ('2500-CSMOA', 'Cosmo_mob_01'): (set(), set(), set()),
     ('2600-NIBLA', 'Nibel_mob_01'): ({SECURITY, GRENADIER, RIOT, FLAME, SCRUTINEYE, SLUGRAY, SWEEPER}, {OPERATOR, SLUGRAY_G}, set()),
 }
 
@@ -34,7 +35,9 @@ POOLS = '''{
  {asset='/Game/DataObject/Field/2200-CORLA/EnemyTerritory.EnemyTerritory',region='2200-CORLA',names={'mobcorla_Cactuar_00'},unlocks={},
   camps={{id='Corla_desert_mob_01',base={{0},{0}},extra={{},{}},totals={2,3},original='t:0.0/c:1.1'},
          {id='Corla_southem_mob_01',base={{0},{0}},extra={{},{}},totals={2,3},original='t:0.0/c:1.1'},
-         {id='Corla_other_mob_01',base={{0}},extra={{}},totals={2},original='t:0/c:2'}}}}'''
+         {id='Corla_other_mob_01',base={{0}},extra={{}},totals={2},original='t:0/c:2'}}},
+ {asset='/Game/DataObject/Field/2600-NIBLA/EnemyTerritory.EnemyTerritory',region='2600-NIBLA',names={'mobnibla_Wolf_00'},unlocks={},
+  camps={{id='NiblaArea_mob_01',base={{0},{0}},extra={{},{}},totals={2,3},original='t:0.0/c:1.1'}}}}'''
 
 
 def lua_runtime(pools=POOLS):
@@ -86,7 +89,7 @@ class Squads(unittest.TestCase):
         self.assertIsNone(squads.pool('2200-CORLA', 'Corla_other_mob_01', lua.table_from({'chapter_select': True, 'chapter': 14})))
 
     # The fixture's tables: 1 is Junon, 2 is Corel (both halves).
-    TABLE = {'JunonArea_mob_01': 1, 'Corla_desert_mob_01': 2, 'Corla_southem_mob_01': 2, 'Corla_other_mob_01': 2}
+    TABLE = {'JunonArea_mob_01': 1, 'Corla_desert_mob_01': 2, 'Corla_southem_mob_01': 2, 'Corla_other_mob_01': 2, 'NiblaArea_mob_01': 3}
 
     def new(self, lua, percent=100, chapter_select=False, chapter=2):
         lua.execute(f"auto=Automatic.new({{enabled=true,seed='613',squad_percent={percent}}})")
@@ -147,22 +150,30 @@ class Squads(unittest.TestCase):
         keys = self.keys(lua, 'Corla_desert_mob_01', 100)
         self.assertEqual(len(self.entries(keys)), 1, keys[:5])
 
-    def test_a_unit_arriving_with_the_budget_spent_stays_monsters_until_freed(self):
+    def test_each_table_has_its_own_budget(self):
         lua = lua_runtime();self.new(lua)
-        lua.execute('auto.activate_for_tests(1);auto.activate_for_tests(2)')
-        self.assertEqual(self.active(lua, '2200-CORLA:desert'), []);self.assertEqual(self.active(lua, '2200-CORLA:southern'), [])
-        keys = [lua.eval(f"auto.choice_of_for_tests('Corla_desert_mob_01',{c})") for c in range(50)]
+        lua.execute('auto.activate_for_tests(1);auto.activate_for_tests(2);auto.activate_for_tests(3)')
+        self.assertEqual(len(self.active(lua, '1300-JUNOA')), 2)
+        self.assertEqual(len(self.active(lua, '2200-CORLA:desert')), 1);self.assertEqual(len(self.active(lua, '2200-CORLA:southern')), 1)
+        self.assertEqual(len(self.active(lua, '2600-NIBLA')), 1, 'Nibelheim takes one type')
+        keys = [lua.eval(f"auto.choice_of_for_tests('NiblaArea_mob_01',{c})") for c in range(80)]
+        self.assertEqual(len(self.entries(keys)), 1, keys[:5])
+
+    def test_a_region_without_a_budget_gets_no_squads(self):
+        lua = lua_runtime();self.new(lua)
+        lua.execute("package.loaded.squads.type_budget['1300-JUNOA']=nil;auto.activate_for_tests(1)")
+        self.assertEqual(self.active(lua, '1300-JUNOA'), [])
+        keys = [lua.eval(f"auto.choice_of_for_tests('JunonArea_mob_01',{c})") for c in range(50)]
         self.assertFalse(any(k.startswith('t:r') for k in keys), 'a squad without budget')
-        lua.execute('auto.release_for_tests(1);auto.release_for_tests(2);auto.activate_for_tests(2)')
-        self.assertEqual(len(self.active(lua, '2200-CORLA:desert')), 1)
+        lua.execute("package.loaded.squads.type_budget['1300-JUNOA']=2")
 
     def test_a_sweeper_is_never_a_units_only_type(self):
         lua = lua_runtime();self.new(lua)
-        lua.execute('package.loaded.squads.type_budget=1')
+        lua.execute("package.loaded.squads.type_budget['1300-JUNOA']=1")
         for _ in range(60):
             lua.execute('auto.release_for_tests(1);auto.activate_for_tests(1)')
             self.assertNotEqual(self.active(lua, '1300-JUNOA'), [10])
-        lua.execute('package.loaded.squads.type_budget=2')
+        lua.execute("package.loaded.squads.type_budget['1300-JUNOA']=2")
 
     def test_each_visit_draws_again_and_the_count_is_saved(self):
         lua = lua_runtime();self.new(lua);sets = set()

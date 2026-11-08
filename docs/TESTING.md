@@ -114,3 +114,24 @@ evening on the 2026-11-05 Proof of Concept backup (chapter select) in test slot 
 
 Leaving each region released its budget (`level_left` restored every camp). No faults; every slow tick was inside the
 call that asks for the player, with the test harness loaded.
+
+#### Why some camps came out short (investigated 2026-11-08)
+
+Each run forced a pair of squad types into one region, then compared every camp in range with what the seed says it
+should hold (by `scan_actor_inventory`, whose actor names read `<template>_NNN@<camp>`).
+
+| Test | Result |
+| --- | --- |
+| Gongaga's pair (Spiked Bat Bandit, Thug C) in Junon, Hunting Grounds | All 12 camps exactly right, mixed camps included |
+| Same pair in Gongaga from South Gate, twice | Bandits only; every Thug missing |
+| Same pair in Gongaga from the airstrip side | Thugs only; every Bandit missing |
+| Two small enemies (11 MB and 5 MB of assets) in Gongaga | One spawned, the other missing |
+| Three types in Junon | Two spawned, the third missing |
+| Two types in Midgar outskirts, with two Bandit types in the Grasslands at once | All exactly right |
+
+So each region spawns a fixed number of squad types it doesn't load itself: the first ones its camps ask for, for the
+whole visit, whatever their size. Junon, Corel, Midgar outskirts and the Grasslands take two; Gongaga, Cosmo Canyon and
+Nibelheim one. Ruled out: timing (later camps still miss), asset size, and the size of the region's own enemy table.
+The game's own cause isn't known; its `CharaPop` settings (a 128-character cap and a character memory pool) don't
+explain a one-or-two count. The mod uses these measured numbers per region (`squads.type_budget`). At the owner's
+request Gongaga and Cosmo Canyon have no squads.
