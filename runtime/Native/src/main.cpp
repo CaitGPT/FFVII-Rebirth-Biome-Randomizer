@@ -22,6 +22,7 @@
 #include "write_arguments.hpp"
 #include "persistent_dispatch.hpp"
 #include "spawn_points.hpp"
+#include "resident_templates.hpp"
 #include <Unreal/UObjectGlobals.hpp>
 #include <unordered_map>
 #include <memory>
@@ -92,12 +93,36 @@ std::string joined(const std::vector<int>& values) {
     std::string out;for(std::size_t i=0;i<values.size();++i) {if(i) out+='.';out+=std::to_string(values[i]);}
     return out;
 }
+// An enemy entry is the table's own catalog number, or "r<n>" for reviewed resident template n (kept as
+// resident_base+n here). Squads use the resident templates: the always-loaded table has every one of them.
+constexpr int resident_base=1000;
+std::vector<int> enemy_entries(const std::string& text) {
+    std::vector<int> out;std::size_t at=0;
+    while(at<text.size()) {
+        const auto dot=text.find('.',at);auto part=text.substr(at,dot==std::string::npos?std::string::npos:dot-at);
+        int base=0;
+        if(!part.empty() && part[0]=='r') {base=resident_base;part=part.substr(1);}
+        if(part.empty() || part.size()>3 || part.find_first_not_of("0123456789")!=std::string::npos) throw std::runtime_error("invalid_composition");
+        out.push_back(base+std::stoi(part));
+        if(dot==std::string::npos) break;
+        at=dot+1;
+    }
+    return out;
+}
+std::string joined_enemies(const std::vector<int>& values) {
+    std::string out;
+    for(std::size_t i=0;i<values.size();++i) {
+        if(i) out+='.';
+        out+=values[i]>=resident_base?"r"+std::to_string(values[i]-resident_base):std::to_string(values[i]);
+    }
+    return out;
+}
 struct Composition {std::vector<int> enemies,counts;};
 Composition parse(const std::string& key,std::uint32_t slots) {
     if(key.rfind("t:",0)!=0) throw std::runtime_error("invalid_composition");
     const auto split=key.find("/c:");
     if(split==std::string::npos) throw std::runtime_error("invalid_composition");
-    Composition out{numbers(key.substr(2,split-2)),numbers(key.substr(split+3))};
+    Composition out{enemy_entries(key.substr(2,split-2)),numbers(key.substr(split+3))};
     if(out.enemies.size()!=slots || out.counts.size()!=slots) throw std::runtime_error("invalid_composition");
     return out;
 }
@@ -321,14 +346,25 @@ std::string apply_changes(std::uintptr_t address,std::size_t table_index,const s
             std::vector<unsigned char> names(8*reviewed_target.slots),counts(reviewed_target.slots);
             for(std::uint32_t s=0;s<reviewed_target.slots;++s) {
                 const auto enemy=wanted.enemies[s];const auto count=wanted.counts[s];
+                if(count<1 || count>12) throw std::runtime_error("count_out_of_range");
+                counts[s]=static_cast<unsigned char>(count);
+                if(enemy>=resident_base) {
+                    // A reviewed resident template, found by name. Find only: a name the game hasn't made means the
+                    // resident table isn't what was reviewed, so nothing is written.
+                    const auto index=static_cast<std::size_t>(enemy-resident_base);
+                    if(index>=reviewed::resident_templates.size()) throw std::runtime_error("resident_template_unknown");
+                    const RC::Unreal::FName found(reviewed::resident_templates[index],RC::Unreal::FNAME_Find);
+                    const std::uint32_t name_index=found.GetComparisonIndex(),name_number=found.GetNumber();
+                    if(name_index==0) throw std::runtime_error("resident_template_unavailable");
+                    std::memcpy(names.data()+8*s,&name_index,4);std::memcpy(names.data()+8*s+4,&name_number,4);
+                    continue;
+                }
                 if(enemy<0 || static_cast<std::size_t>(enemy)>=reviewed_table.catalog_count || enemy>=64 ||
                    !(reviewed_target.allowed[s]&(1ull<<enemy))) throw std::runtime_error("enemy_not_allowed_here");
-                if(count<1 || count>12) throw std::runtime_error("count_out_of_range");
                 // The table's own copy of this enemy's name, exactly as the game resolved it.
                 std::memcpy(names.data()+8*s,before.bytes.data()+reviewed_table.catalog[enemy],8);
-                counts[s]=static_cast<unsigned char>(count);
             }
-            enemies_at=reinterpret_cast<std::uintptr_t>(owned("T"+std::to_string(table_index)+":"+joined(wanted.enemies),names));
+            enemies_at=reinterpret_cast<std::uintptr_t>(owned("T"+std::to_string(table_index)+":"+joined_enemies(wanted.enemies),names));
             low_at=high_at=reinterpret_cast<std::uintptr_t>(owned("C:"+joined(wanted.counts),counts));
         }
         for(const auto& write:std::array<std::pair<std::uint32_t,std::uint64_t>,3>{{

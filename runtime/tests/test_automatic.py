@@ -80,9 +80,9 @@ function BiomeRandomizerTableStatus(address,index) status_calls=status_calls+1;r
 function BiomeRandomizerSetNext(address,index,target,expected,desired)
     if choices[index][target+1]~=expected then return json.encode({ok=false,reason='stale_expected_selection'}) end
     if desired~='o' then
-        local enemies,counts=desired:match('^t:([%d%.]+)/c:([%d%.]+)$')
+        local enemies,counts=desired:match('^t:([r%d%.]+)/c:([%d%.]+)$')
         assert(enemies,'malformed composition '..desired)
-        local e={};for v in enemies:gmatch('%d+') do e[#e+1]=tonumber(v) end
+        local e={};for v in enemies:gmatch('r?%d+') do e[#e+1]=v end
         local c={};for v in counts:gmatch('%d+') do c[#c+1]=tonumber(v) end
         assert(#e==#c,'slots and counts differ')
         for _,v in ipairs(c) do assert(v>=1,'empty slot') end
@@ -100,7 +100,7 @@ function BiomeRandomizerSetMany(address,index,spec)
     return json.encode(result)
 end
 polled={};spawn_ready={Grassland_mob_05=true,Grassland_mob_23=true,JunonArea_mob_01=true}
-auto=Automatic.new({enabled=true,seed='613'});auto:step();auto:step();auto:step();assert(not auto.fault,auto.fault)
+auto=Automatic.new({enabled=true,seed='613',squad_percent=0});auto:step();auto:step();auto:step();assert(not auto.fault,auto.fault)
 start_writes=#native_writes
 function committed(camp) return json.decode(disk).cycles[camp or 'Grassland_mob_05'].cycle end
 function fight(names)
@@ -114,7 +114,7 @@ class Adapter(unittest.TestCase):
         lua=LuaRuntime()
         lua.globals().python_hash=lambda value:hashlib.sha256(value.encode()).hexdigest()
         lua.execute('BiomeRandomizerSHA256=function(s) return python_hash(s) end')
-        for module in ('biome_json','lifecycle','state_store'):
+        for module in ('biome_json','lifecycle','state_store','squads'):
             lua.globals().source=(ROOT/(module+'.lua')).read_text(encoding='utf-8')
             value=lua.execute('return assert(load(source))()')
             lua.globals().package.loaded[module]=value
@@ -205,7 +205,7 @@ class Adapter(unittest.TestCase):
         self.run_case('''
             disk='';native_writes={};choices={[0]={'o','o'},[1]={'o'}};polled={}
             story_flags['stfWorldReport_Finish_GRASA_002']=true
-            local fresh=Automatic.new({enabled=true,seed='613'});for i=1,3 do fresh:step() end
+            local fresh=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,3 do fresh:step() end
             assert(not fresh.fault,fresh.fault)
             assert(json.decode(disk).unlocked[1]=='mobgrasa_WereRat_Rare_00','not unlocked from the save')
             local said=false;for _,line in ipairs(logs) do if line:find('"source":"save"',1,true) then said=true end end
@@ -270,7 +270,7 @@ class Adapter(unittest.TestCase):
     def test_another_writer_is_never_overwritten(self):
         self.run_case('''
             disk='';native_writes={};choices={[0]={'t:1.1/c:1.1','o'},[1]={'o'}};polled={}
-            local fresh=Automatic.new({enabled=true,seed='613'});for i=1,3 do fresh:step() end
+            local fresh=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,3 do fresh:step() end
             assert(fresh.fault and fresh.fault:find('preexisting_reference_change',1,true));assert(#native_writes==0)
         ''')
 
@@ -288,7 +288,7 @@ class Adapter(unittest.TestCase):
     def test_only_the_arriving_camps_tables_are_looked_up(self):
         self.run_case('''
             choices={[0]={'o','o'},[1]={'o'}};polled={};spawn_ready={Grassland_mob_05=true};found_paths={}
-            local fresh=Automatic.new({enabled=true,seed='613'});for i=1,10 do fresh:step() end
+            local fresh=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,10 do fresh:step() end
             assert(not fresh.fault,fresh.fault)
             assert(found_paths['/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory']==1,'Grasslands not looked up once')
             assert(not found_paths['/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory'],'a table with no arriving camps was looked up')
@@ -311,7 +311,7 @@ class Adapter(unittest.TestCase):
         self.run_case('''
             loaded_assets['/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory']=1
             choices={[0]={'o','o'},[1]={'o'}};polled={};status_calls=0
-            local both=Automatic.new({enabled=true,seed='613'})
+            local both=Automatic.new({enabled=true,seed='613',squad_percent=0})
             local most=0
             for i=1,10 do local before=status_calls;both:step();if status_calls-before>most then most=status_calls-before end end
             assert(not both.fault,both.fault);assert(most==1,'more than one table prepared in one step: '..most)
@@ -321,7 +321,7 @@ class Adapter(unittest.TestCase):
     def test_an_unnamed_arrival_still_prepares_every_loaded_table(self):
         self.run_case('''
             unnamed_fresh=true;choices={[0]={'o','o'},[1]={'o'}};polled={}
-            local blind=Automatic.new({enabled=true,seed='613'});for i=1,10 do blind:step() end
+            local blind=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,10 do blind:step() end
             assert(not blind.fault,blind.fault);assert(choices[0][1]~='o','Grasslands not prepared')
         ''')
 
@@ -364,7 +364,7 @@ class Adapter(unittest.TestCase):
             local status=BiomeRandomizerTableStatus
             BiomeRandomizerTableStatus=function(...) ms=ms+150;return status(...) end
             choices={[0]={'o','o'},[1]={'o'}};polled={};logs={}
-            local timed=Automatic.new({enabled=true,seed='613'});for i=1,10 do timed:step() end
+            local timed=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,10 do timed:step() end
             assert(not timed.fault,timed.fault)
             local reports={}
             for _,line in ipairs(logs) do
@@ -385,7 +385,7 @@ class Adapter(unittest.TestCase):
     def test_nothing_runs_before_the_first_player_is_seen(self):
         self.run_case('''
             pawn_gone=true;battle_calls=0
-            local early=Automatic.new({enabled=true,seed='613'});for i=1,20 do early:step() end
+            local early=Automatic.new({enabled=true,seed='613',squad_percent=0});for i=1,20 do early:step() end
             assert(battle_calls==0 and not early.fault)
         ''')
 

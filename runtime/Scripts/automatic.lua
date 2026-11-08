@@ -8,7 +8,13 @@ local Lifecycle=require('lifecycle')
 local StateStore=require('state_store')
 local json=require('biome_json')
 local tables=require('world_pools')
+local Squads=require('squads')
 local M={}
+-- About one roll in five makes a camp a squad, where its region has one. Chapter select is the game's own flag
+-- for it being released, which happens when Chapter 14 is cleared.
+local default_squad_percent=20
+local chapter_select_flag='stfComn_Release_ChapterSelect'
+local hundred={};for k=1,100 do hundred[k]=k end
 local idle_seconds,battle_seconds=1,0.5
 local load_ticks=3 -- this many ticks with no player and no battle: stop touching the game's APIs
 -- A level's groups spawn soon after its spawn actors appear, so they're looked for often. It's cheap.
@@ -56,7 +62,12 @@ end
 function M.new(config)
     local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},
         camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={},
-        pending_tables={},found={},sections={},slow_reported_at=nil,slow_unreported=0}
+        pending_tables={},found={},sections={},slow_reported_at=nil,slow_unreported=0,
+        gates={chapter_select=false,chapter=0}}
+    local squad_percent=default_squad_percent
+    if type(config.squad_percent)=='number' and config.squad_percent>=0 and config.squad_percent<=100 then
+        squad_percent=config.squad_percent -- for testing; not in the shipped config
+    end
     -- Timing for the slow-step report: each lap adds the time since the last one to its part of the step.
     local clock=type(BiomeRandomizerClockMs)=='function' and BiomeRandomizerClockMs or nil
     local lap_at=0
@@ -119,11 +130,34 @@ function M.new(config)
     local function pick(salt,cycle,pool)
         return Lifecycle.selection(self.store.seed,salt,cycle,pool,BiomeRandomizerSHA256)
     end
+    -- A squad: every slot from the region's squad pool, never monsters, and at most one J-Unit Sweeper, which
+    -- then stands alone in its slot. The camp's own range of totals still sets how many there are.
+    local function squad_roll(camp,cycle,tag,pool)
+        local info=self.camp_info[camp]
+        local enemies={};local sweeper_at
+        local without={};for _,v in ipairs(pool) do if v~=Squads.sweeper then without[#without+1]=v end end
+        for slot=1,#info.camp.base do
+            local choices=(sweeper_at and #without>0) and without or pool
+            local enemy=pick(camp..'#q'..slot..tag,cycle,choices)
+            if enemy==Squads.sweeper then sweeper_at=slot end
+            enemies[slot]='r'..enemy
+        end
+        local counts=split(pick(camp..'#qn'..tag,cycle,info.camp.totals),#enemies)
+        if sweeper_at then
+            local extra=counts[sweeper_at]-1;counts[sweeper_at]=1
+            for slot=1,#counts do if slot~=sweeper_at then counts[slot]=counts[slot]+extra;break end end
+        end
+        return key_of(enemies,counts)
+    end
     -- What stands in each slot and how many: seeded by camp and counter, from the camp's own
     -- enemies plus any its region's won assignments have added. Salt k gives another roll.
     local function roll(camp,cycle,k)
         local info=self.camp_info[camp];local names=info.entry.names;local unlocked=self.store.unlocked_set
         local tag=k>0 and ('~'..k) or ''
+        local squad=Squads.pool(info.entry.region,camp,self.gates)
+        if squad and squad_percent>0 and pick(camp..'#squad'..tag,cycle,hundred)<=squad_percent then
+            return squad_roll(camp,cycle,tag,squad)
+        end
         local enemies={}
         for slot,base in ipairs(info.camp.base) do
             local pool={};for _,enemy in ipairs(base) do pool[#pool+1]=enemy end
@@ -334,9 +368,21 @@ function M.new(config)
     end
     -- The save's own record of each won Combat Assignment: the World Report's completion flag, the same one
     -- the Fiend Intel screen reads. This is what lets assignments won before the mod was installed count.
+    -- What the loaded save allows squads to use: its chapter, and whether chapter select is released.
+    local function read_gates(db)
+        local ok_progress,progress=pcall(function() return db:GetChapterProgress() end)
+        local ok_flag,released=pcall(function() return db:IsStoryFlag(FName(chapter_select_flag)) end)
+        if not ok_progress or type(progress)~='number' or not ok_flag or type(released)~='boolean' then return end
+        local gates={chapter_select=released,chapter=progress//1000}
+        if gates.chapter_select~=self.gates.chapter_select or gates.chapter~=self.gates.chapter then
+            self.gates=gates;self.chosen={}
+            emit('squad_gates',{chapter=gates.chapter,chapter_progress=progress,chapter_select=gates.chapter_select})
+        end
+    end
     function check_flags()
         local db=api('EndDataBaseAPI')
         if not valid(db) then return end
+        read_gates(db)
         for territory,info in pairs(self.assignment_of) do
             if info.flag and not self.store.unlocked_set[info.name] then
                 local ok,won=pcall(function() return db:IsStoryFlag(FName(info.flag)) end)
@@ -425,6 +471,7 @@ function M.new(config)
     end
     -- For the offline fixtures only: the composition a camp gets at a counter value.
     function self.choice_of_for_tests(camp,cycle) initialize();return choice_of(camp,cycle) end
+    function self.read_gates_for_tests(db) read_gates(db) end
     return self
 end
 return M
