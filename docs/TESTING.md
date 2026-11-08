@@ -82,3 +82,21 @@ The first four-camp version passed clear-to-respawn in both directions, restart 
 The owner reports also playtesting the mod in Corel. This is additional human playtesting, separate from the
 agent-run results above. Individual camps, fight counts and respawn outcomes were not recorded in that report;
 it does not mark the earlier two-fight agent test as completed.
+
+### Squads (in progress, 2026-11-08)
+
+Live on slot 13 (chapter select, Chapter 12) and slot 17, with a test config that made every camp in a squad region a
+squad. Nothing was saved.
+
+| What | Result |
+| --- | --- |
+| Save gates | `squad_gates` read Chapter 12 and chapter select released on slot 13 |
+| Grasslands (experiment build) | Security Officer, Slug-Ray and Bandit squads spawned, looked like the field enemies, fought and counted; an in-game reload restored and re-prepared without a crash |
+| Junon | J-Unit Sweeper squads (one per squad) fought and counted twice; Junon Elite Security Officers spawned (chapter-select gate). The game spawned the Sweeper as its Junon variant |
+| Corel desert | Bandits and Thugs spawned, but only two enemy types of the eight in the pool |
+| Corel southern coast | Its squad camps spawned nothing, after the desert's two types |
+| Nibelheim | Security Officer squads spawned |
+
+The limit: a region spawns at most two squad enemy types it doesn't already load for itself. Slots naming a third type
+spawn nothing (no crash, no fault). Shown by the desert: four types requested, two spawned; a different two on another
+run; one type requested, it spawned everywhere. Not releasable until the selection respects this.
