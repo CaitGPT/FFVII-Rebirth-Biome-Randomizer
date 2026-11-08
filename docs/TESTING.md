@@ -98,5 +98,19 @@ squad. Nothing was saved.
 | Nibelheim | Security Officer squads spawned |
 
 The limit: a region spawns at most two squad enemy types it doesn't already load for itself. Slots naming a third type
-spawn nothing (no crash, no fault). Shown by the desert: four types requested, two spawned; a different two on another
-run; one type requested, it spawned everywhere. Not releasable until the selection respects this.
+spawn nothing (no crash, no fault). Shown by the desert: four types requested, two spawned (other members of the same
+camps missing); a different two on another run; one type requested, it spawned everywhere. The empty southern coast in
+that run was mostly where we stood: from Clamshell Beach, below the cliff, its camps hadn't spawned yet.
+
+So squads now share a two-type budget among the units loaded at once (a region, or a Corel half). Measured the same
+evening on the 2026-11-05 Proof of Concept backup (chapter select) in test slot 10, every camp a squad, nothing saved:
+
+| Unit | Types drawn | Result |
+| --- | --- | --- |
+| Corel desert | Bandit (Scimitar) | All 14 camps in range full |
+| Corel southern coast | Slug-Ray | All 8 camps full, seen from the clifftop |
+| Junon (alone) | Junon Elite Security Officer, Type G Slug-Ray | Both types in 13 camps, some camps holding both |
+| Nibelheim (alone) | Security Officer, Flametrooper | Security Officers in the three camps in range; no Flametrooper seen (its camps were further out) |
+
+Leaving each region released its budget (`level_left` restored every camp). No faults; every slow tick was inside the
+call that asks for the player, with the test harness loaded.
