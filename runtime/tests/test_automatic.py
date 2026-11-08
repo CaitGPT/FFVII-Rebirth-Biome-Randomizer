@@ -45,8 +45,9 @@ local party=object({GetBattleMemberCount=function() return #party_members end,Ge
 local viewport=object({World=object({GetAddress=function() return 77 end})});local engine=object({GameViewport=viewport})
 -- As in the game: no player pawn for the whole of a battle.
 local statics=object({GetPlayerPawn=function() if battle_active or pawn_gone then return nil end;return cloud end})
+found_paths={}
 function StaticFindObject(path)
-    finds=finds+1
+    finds=finds+1;found_paths[path]=(found_paths[path] or 0)+1
     if path=='/Script/Engine.Default__GameplayStatics' then return statics end
     if path=='/Script/EndGame.Default__EndBattleAPI' then return battle end
     if path=='/Script/EndGame.Default__EndPartyAPI' then return party end
@@ -65,11 +66,13 @@ function BiomeRandomizerRandomSeed() return '613' end
 function BiomeRandomizerSpawnReady(camp) return spawn_ready[camp]==true end
 function BiomeRandomizerSpawnPoll()
     scans=scans+1
-    local fresh,gone,names=0,0,{}
-    for camp in pairs(spawn_ready) do if not polled[camp] then fresh=fresh+1 end end
+    local fresh,gone,names,arrived=0,0,{},{}
+    for camp in pairs(spawn_ready) do if not polled[camp] then fresh=fresh+1;arrived[#arrived+1]=camp end end
     for camp in pairs(polled) do if not spawn_ready[camp] then gone=gone+1;names[#names+1]=camp end end
     polled={};for camp in pairs(spawn_ready) do polled[camp]=true end
-    return json.encode({fresh=fresh,gone=gone,gone_camps=table.concat(names,',')})
+    -- Like the native poll: the camps that arrived are named, unless the list was cut short.
+    if unnamed_fresh then arrived={} end
+    return json.encode({fresh=fresh,fresh_camps=table.concat(arrived,','),gone=gone,gone_camps=table.concat(names,',')})
 end
 function BiomeRandomizerSpawnStats() return '{}' end
 function BiomeRandomizerTableStatus(address,index) status_calls=status_calls+1;return json.encode({ok=true,asset_content=address,choices=choices[index]}) end
@@ -274,11 +277,89 @@ class Adapter(unittest.TestCase):
     def test_idle_play_does_no_lookups_or_table_reads(self):
         # Path lookups stalled the game thread by 60 ms a tick before this design.
         self.run_case('''
-            auto:step();finds=0;status_calls=0;flag_reads=0
+            -- The Junon camp's table isn't loaded: it is looked for a bounded number of times, then left alone.
+            for i=1,10 do auto:step() end;finds=0;status_calls=0;flag_reads=0
             for i=1,100 do auto:step() end
             assert(finds==0,'idle ticks looked things up: '..finds)
             assert(flag_reads==0,'idle ticks read story flags: '..flag_reads)
             assert(status_calls==0 and not auto.fault)
+        ''')
+
+    def test_only_the_arriving_camps_tables_are_looked_up(self):
+        self.run_case('''
+            choices={[0]={'o','o'},[1]={'o'}};polled={};spawn_ready={Grassland_mob_05=true};found_paths={}
+            local fresh=Automatic.new({enabled=true,seed='613'});for i=1,10 do fresh:step() end
+            assert(not fresh.fault,fresh.fault)
+            assert(found_paths['/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory']==1,'Grasslands not looked up once')
+            assert(not found_paths['/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory'],'a table with no arriving camps was looked up')
+            -- More camps of a prepared table arrive: it is reused, not looked up again.
+            spawn_ready.Grassland_mob_23=true;for i=1,5 do fresh:step() end
+            assert(found_paths['/Game/DataObject/Field/1200-GRASA/EnemyTerritory.EnemyTerritory']==1,'prepared table looked up again')
+            assert(choices[0][2]~='o','the later camp was not changed')
+        ''')
+
+    def test_a_table_that_cannot_be_found_is_looked_for_a_bounded_number_of_times(self):
+        self.run_case('''
+            local path='/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory'
+            for i=1,10 do auto:step() end
+            assert(found_paths[path]==5,'expected 5 lookups for the missing table, got '..tostring(found_paths[path]))
+            for i=1,50 do auto:step() end
+            assert(found_paths[path]==5,'kept looking for a missing table')
+        ''')
+
+    def test_one_table_is_prepared_per_step(self):
+        self.run_case('''
+            loaded_assets['/Game/DataObject/Field/1300-JUNOA/EnemyTerritory.EnemyTerritory']=1
+            choices={[0]={'o','o'},[1]={'o'}};polled={};status_calls=0
+            local both=Automatic.new({enabled=true,seed='613'})
+            local most=0
+            for i=1,10 do local before=status_calls;both:step();if status_calls-before>most then most=status_calls-before end end
+            assert(not both.fault,both.fault);assert(most==1,'more than one table prepared in one step: '..most)
+            assert(choices[0][1]~='o' and choices[1][1]~='o','both tables were not prepared')
+        ''')
+
+    def test_an_unnamed_arrival_still_prepares_every_loaded_table(self):
+        self.run_case('''
+            unnamed_fresh=true;choices={[0]={'o','o'},[1]={'o'}};polled={}
+            local blind=Automatic.new({enabled=true,seed='613'});for i=1,10 do blind:step() end
+            assert(not blind.fault,blind.fault);assert(choices[0][1]~='o','Grasslands not prepared')
+        ''')
+
+    def test_leaving_a_level_restores_without_looking_anything_up(self):
+        self.run_case('''
+            for i=1,10 do auto:step() end -- past the bounded lookups for the Junon table, which isn't loaded
+            assert(choices[0][1]~='o');finds=0
+            spawn_ready={};auto:step();auto:step()
+            assert(not auto.fault,auto.fault)
+            assert(choices[0][1]=='o' and choices[0][2]=='o','table not restored')
+            assert(finds==0,'restore looked things up: '..finds)
+        ''')
+
+    def test_save_flags_are_read_once_per_load(self):
+        self.run_case('''
+            spawn_ready.Grassland_mob_99=true;flag_reads=0
+            for i=1,5 do auto:step() end
+            assert(flag_reads==0,'a second arrival in one load read the flags again: '..flag_reads)
+            spawn_ready={};for i=1,3 do auto:step() end
+            spawn_ready={Grassland_mob_05=true};flag_reads=0;for i=1,3 do auto:step() end
+            assert(flag_reads>0,'flags not read after leaving a level')
+        ''')
+
+    def test_a_slow_step_reports_its_parts_at_most_every_five_seconds(self):
+        self.run_case('''
+            local ms=0;BiomeRandomizerClockMs=function() return ms end
+            local status=BiomeRandomizerTableStatus
+            BiomeRandomizerTableStatus=function(...) ms=ms+150;return status(...) end
+            choices={[0]={'o','o'},[1]={'o'}};polled={};logs={}
+            local timed=Automatic.new({enabled=true,seed='613'});for i=1,10 do timed:step() end
+            assert(not timed.fault,timed.fault)
+            local reports={}
+            for _,line in ipairs(logs) do
+                local body=line:match('(%b{})');if body then local e=json.decode(body);if e.event=='slow_step' then reports[#reports+1]=e end end
+            end
+            assert(#reports>=1,'no slow_step report')
+            assert(reports[1].ms>=150 and reports[1].parts.table_check>=150,'table check not named: '..json.encode(reports[1]))
+            -- The fake clock moves ten seconds a call, so every slow step here is over five seconds apart.
         ''')
 
     def test_a_load_or_shutdown_stops_touching_the_game(self):

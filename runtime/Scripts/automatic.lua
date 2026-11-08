@@ -16,6 +16,11 @@ local poll_seconds=0.25
 local unlock_seconds=20 -- how long after a won assignment to wait for its enemies to be gone
 local flag_delay=3 -- seconds after a load or a fight before reading the save's assignment records
 local repeat_tries=8
+-- A table whose camps arrived but which can't be found yet is looked for again this many polls, then left
+-- until more of its camps arrive. Each failed lookup searches the game's objects, so it isn't free.
+local lookup_tries=4
+-- A step slower than this reports which of its parts took the time, at most once every slow_report_seconds.
+local slow_step_ms,slow_report_seconds=100,5
 local function valid(object)
     local ok,result=pcall(function() return object and object:IsValid() end)
     return ok and result==true
@@ -50,7 +55,15 @@ local function split(total,slots)
 end
 function M.new(config)
     local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},
-        camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={}}
+        camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={},
+        pending_tables={},sections={},slow_reported_at=nil,slow_unreported=0}
+    -- Timing for the slow-step report: each lap adds the time since the last one to its part of the step.
+    local clock=type(BiomeRandomizerClockMs)=='function' and BiomeRandomizerClockMs or nil
+    local lap_at=0
+    local function lap(part)
+        if not clock then return end
+        local at=clock();self.sections[part]=(self.sections[part] or 0)+(at-lap_at);lap_at=at
+    end
     for index,entry in ipairs(tables) do
         for target,camp in ipairs(entry.camps) do
             self.camp_table[camp.id]={table=index,target=target}
@@ -138,11 +151,16 @@ function M.new(config)
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
+    -- The table object found when its camps arrived is kept and reused: looking a table up by its path
+    -- searches the game's objects, which cost hundreds of milliseconds when every table was looked up at each
+    -- arrival. The token check below still catches a table that was reloaded in its place.
     local function prepare_table(index)
         local entry=tables[index]
-        local object=resolve(entry.asset)
-        if not valid(object) then self.loaded[index]=nil;return false end
+        local object=self.loaded[index]
+        if not valid(object) then object=resolve(entry.asset);lap('lookup') end
+        if not valid(object) then self.loaded[index]=nil;return nil end
         local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
+        lap('table_check')
         if not status.ok then error('table_guard:'..entry.region..':'..tostring(status.reason)) end
         local token=tostring(object:GetAddress())..':'..tostring(status.asset_content)
         if self.tokens[index]~=token then self.current[index]=nil end
@@ -165,23 +183,37 @@ function M.new(config)
                 end
             end
         end
+        lap('choices')
         if #lines>0 then
             local result=json.decode(BiomeRandomizerSetMany(object:GetAddress(),index-1,table.concat(lines,';')))
             assert(result.ok,'reference_unverified:'..tostring(result.reason))
             for target,desired in pairs(wanted) do
                 assert(result.choices[target]==desired,'reference_unverified');current[target]=desired;changed=changed+1
             end
+            lap('table_write')
         end
         self.current[index]=current
         emit('table_ready',{region=entry.region,camps=#entry.camps,changed=changed,waiting=waiting,spawn=json.decode(BiomeRandomizerSpawnStats())})
+        lap('report')
         return waiting==0
+    end
+    -- At most one table a step, so a load that brings several regions' camps spreads the work out. A camp
+    -- whose table isn't done yet keeps the game's own enemies, which is always safe.
+    local function prepare_next()
+        local index
+        for candidate in pairs(self.pending_tables) do if not index or candidate<index then index=candidate end end
+        if not index then return end
+        local tries=self.pending_tables[index]
+        if prepare_table(index)==nil and tries<lookup_tries then self.pending_tables[index]=tries+1
+        else self.pending_tables[index]=nil end
     end
     -- A table can outlive the level that uses it, and the new level's spawn actors start with empty
     -- lists. A changed row left behind could ask for a size that isn't there yet, which crashes the
     -- game. So a region's table goes back to the game's own lists as its level leaves.
+    -- Only a table this mod prepared can hold its changes, and that one is still at hand, so nothing is looked up.
     local function restore_table(index)
         local entry=tables[index]
-        local object=resolve(entry.asset)
+        local object=self.loaded[index]
         self.loaded[index]=nil;self.current[index]=nil;self.tokens[index]=nil
         if not valid(object) then return 0 end
         local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
@@ -205,6 +237,7 @@ function M.new(config)
         local viewport=engine.GameViewport;if not valid(viewport) then return end
         local world=viewport.World;if not valid(world) then return end
         local result=json.decode(BiomeRandomizerSpawnPoll(world:GetAddress()))
+        lap('spawn_poll')
         if result.gone>0 then
             local regions={}
             for camp in result.gone_camps:gmatch('[^,]+') do
@@ -212,12 +245,24 @@ function M.new(config)
             end
             local restored=0
             for index in pairs(regions) do restored=restored+restore_table(index) end
+            self.flags_checked=false -- leaving a level: a load or fast travel, maybe into another save
             emit('level_left',{actors=result.gone,restored=restored})
+            lap('restore')
         end
         if result.fresh>0 then
             initialize()
-            check_flags() -- a load streams spawn levels in before the pawn: start it with its save's unlocks
-            for index in ipairs(tables) do prepare_table(index) end
+            -- A load streams spawn levels in before the pawn: start it with its save's unlocks. Once a load.
+            if not self.flags_checked then self.flags_checked=true;check_flags();lap('flags') end
+            -- Only the tables of the camps that arrived. A list cut short means camps went unnamed: all tables.
+            local named=0
+            for camp in (result.fresh_camps or ''):gmatch('[^,]+') do
+                named=named+1
+                local where=self.camp_table[camp]
+                if where then self.pending_tables[where.table]=self.pending_tables[where.table] or 0 end
+            end
+            if named<result.fresh then
+                for index in ipairs(tables) do self.pending_tables[index]=self.pending_tables[index] or 0 end
+            end
         end
     end
     local function party_alive(battle,party)
@@ -312,48 +357,69 @@ function M.new(config)
             end
         end
     end
+    -- Which parts of a slow step took the time. A part that is only a game call (pawn, battle_state, flags)
+    -- also holds any other mod's queued game-thread work that the engine ran inside that call.
+    local function report_slow(total,now)
+        if total<slow_step_ms then return end
+        if self.slow_reported_at and now-self.slow_reported_at<slow_report_seconds then
+            self.slow_unreported=self.slow_unreported+1;return
+        end
+        local parts,counted={},0
+        for part,ms in pairs(self.sections) do parts[part]=math.floor(ms*10+0.5)/10;counted=counted+ms end
+        parts.other=math.floor((total-counted)*10+0.5)/10
+        emit('slow_step',{ms=math.floor(total*10+0.5)/10,parts=parts,unreported_since_last=self.slow_unreported,
+            pending_tables=(function() local n=0;for _ in pairs(self.pending_tables) do n=n+1 end;return n end)()})
+        self.slow_reported_at=now;self.slow_unreported=0
+    end
     function self:step()
         if self.fault or config.enabled~=true then return end
         local now=os.clock()
         if now<self.next_step then return end
         self.next_step=now+idle_seconds
+        local started=clock and clock() or 0
+        lap_at=started;self.sections={}
         local ok,error_value=pcall(function()
             if BiomeRandomizerStateWriteFailed() and not self.write_warned then
                 self.write_warned=true;emit('state_write_failed',{})
             end
             local actor=pawn()
+            lap('pawn')
             if not actor and not self.pawn_seen then return end -- the title screen: don't touch the game yet
             self.pawn_seen=true
             self.next_step=math.min(self.next_step,now+poll_seconds)
             -- Before the camp tables are prepared, so a load starts with its save's unlocks.
-            if actor and self.store and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags() end
+            if actor and self.store and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags();lap('flags') end
             poll_spawn_actors(now)
+            prepare_next()
             -- Past this point, with no pawn, the game may be loading or shutting down. Leave it alone.
             if not actor and self.pawnless>=load_ticks then return end
             local battle,party=api('EndBattleAPI'),api('EndPartyAPI')
             if not valid(battle) or not valid(party) then return end
             local in_battle=battle:IsInBattle()
+            lap('battle_state')
             if type(in_battle)~='boolean' then return end
             if not actor and not in_battle then
                 self.pawnless=self.pawnless+1
-                if self.pawnless>=load_ticks then self.fight=nil;self.pawn_address=nil end
+                if self.pawnless>=load_ticks then self.fight=nil;self.pawn_address=nil;self.flags_checked=false end
                 return
             end
             self.pawnless=0
             initialize()
-            if actor and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags() end
+            if actor and self.flags_due and now>=self.flags_due then self.flags_due=nil;check_flags();lap('flags') end
             if in_battle then
                 self.next_step=now+battle_seconds
                 self.fight=self.fight or {camps={},assignments={}}
                 note_camps(battle)
                 if party_alive(battle,party)==0 then self.fight.lost=true end
+                lap('battle')
                 return
             end
             if not actor then return end
-            if self.fight then finish_fight(battle,party,now) end
-            if next(self.pending_unlocks) then check_unlocks(battle,now) end
+            if self.fight then finish_fight(battle,party,now);lap('fight_end') end
+            if next(self.pending_unlocks) then check_unlocks(battle,now);lap('unlocks') end
         end)
         if not ok then fail(error_value) end
+        if clock then report_slow(clock()-started,now) end
     end
     -- For the offline fixtures only: the composition a camp gets at a counter value.
     function self.choice_of_for_tests(camp,cycle) initialize();return choice_of(camp,cycle) end

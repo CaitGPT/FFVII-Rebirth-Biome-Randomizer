@@ -35,15 +35,22 @@ bool read(std::uintptr_t address, void* output, std::size_t size) {
     return address > 0x10000 && size <= 65536 &&
         ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), output, size, &copied) && copied == size;
 }
+// One provider for the whole process: opening it cost more than each hash. Handles are thread safe.
+BCRYPT_ALG_HANDLE sha256_provider() {
+    static const BCRYPT_ALG_HANDLE provider=[]{
+        BCRYPT_ALG_HANDLE opened{};
+        return BCryptOpenAlgorithmProvider(&opened,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0?BCRYPT_ALG_HANDLE{}:opened;
+    }();
+    return provider;
+}
 std::string digest(const std::vector<unsigned char>& bytes) {
-    BCRYPT_ALG_HANDLE algorithm{};BCRYPT_HASH_HANDLE hash{};
-    if (BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0) throw std::runtime_error("sha256_unavailable");
+    const BCRYPT_ALG_HANDLE algorithm=sha256_provider();BCRYPT_HASH_HANDLE hash{};
+    if(!algorithm) throw std::runtime_error("sha256_unavailable");
     std::array<unsigned char,32> result{};
     auto status=BCryptCreateHash(algorithm,&hash,nullptr,0,nullptr,0,0);
     if(status>=0) status=BCryptHashData(hash,const_cast<unsigned char*>(bytes.data()),static_cast<ULONG>(bytes.size()),0);
     if(status>=0) status=BCryptFinishHash(hash,result.data(),static_cast<ULONG>(result.size()),0);
     if(hash) BCryptDestroyHash(hash);
-    BCryptCloseAlgorithmProvider(algorithm,0);
     if(status<0) throw std::runtime_error("sha256_failed");
     return hex(result.data(),result.size());
 }
@@ -399,7 +406,13 @@ std::unordered_set<std::wstring> spawn_camps;
 std::unordered_map<std::wstring,RC::Unreal::UObject*> spawn_ready;
 std::unordered_map<RC::Unreal::UObject*,std::vector<std::wstring>> spawn_levels; // spawn level -> its camps
 std::vector<RC::Unreal::UObject*> known_levels;
-unsigned long long spawn_seen{},spawn_filled{},spawn_refused{},spawn_polls{},spawn_level_changes{};
+unsigned long long spawn_seen{},spawn_filled{},spawn_refused{},spawn_polls{},spawn_level_changes{},spawn_actors_walked{};
+double spawn_walk_ms_max{},spawn_walk_ms_total{};
+double clock_now_ms() {
+    static const double frequency=[]{LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return static_cast<double>(f.QuadPart);}();
+    LARGE_INTEGER now{};QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart)*1000.0/frequency;
+}
 std::wstring camp_of(const std::wstring& full) {
     const auto at=full.rfind(L'.');
     return at==std::wstring::npos?std::wstring{}:full.substr(at+1);
@@ -416,6 +429,7 @@ std::vector<std::wstring> prepare_spawn_level(RC::Unreal::UObject* level,long lo
     std::vector<std::wstring> camps;
     auto* actors=level_actors(level);
     if(!actors) {++spawn_refused;return camps;}
+    spawn_actors_walked+=static_cast<unsigned long long>(actors->num);
     for(std::int32_t i=0;i<actors->num;++i) {
         auto* actor=actors->data[i];
         if(!actor) continue;
@@ -436,7 +450,7 @@ int spawn_poll(const RC::LuaMadeSimple::Lua& lua) {
         for(const auto& table:reviewed::tables)
             for(std::size_t i=0;i<table.target_count;++i) spawn_camps.insert(table.targets[i].id);
     long long fresh=0,gone=0;
-    std::string gone_camps;
+    std::string gone_camps,fresh_camps;
     try {
         ++spawn_polls;
         auto* world=reinterpret_cast<RC::Unreal::UObject*>(static_cast<std::uintptr_t>(lua.get_integer(1)));
@@ -459,12 +473,19 @@ int spawn_poll(const RC::LuaMadeSimple::Lua& lua) {
             for(auto* level:now) {
                 if(!level || before.contains(level)) continue;
                 if(level->GetFullName().find(L"_World_Navigation_Mod_ServerBuild:PersistentLevel")==std::wstring::npos) continue;
-                spawn_levels[level]=prepare_spawn_level(level,fresh);
+                const double started=clock_now_ms();
+                auto camps=prepare_spawn_level(level,fresh);
+                const double took=clock_now_ms()-started;
+                spawn_walk_ms_total+=took;if(took>spawn_walk_ms_max) spawn_walk_ms_max=took;
+                // Lua prepares only the tables these camps belong to, instead of looking up every table.
+                for(const auto& camp:camps)
+                    if(fresh_camps.size()<8000) {fresh_camps+=fresh_camps.empty()?"":",";fresh_camps+=std::string(camp.begin(),camp.end());}
+                spawn_levels[level]=std::move(camps);
             }
             known_levels=now;
         }
     } catch(...) {++spawn_refused;}
-    lua.set_string("{\"fresh\":"+std::to_string(fresh)+",\"gone\":"+std::to_string(gone)+",\"gone_camps\":\""+gone_camps+"\"}");
+    lua.set_string("{\"fresh\":"+std::to_string(fresh)+",\"fresh_camps\":\""+fresh_camps+"\",\"gone\":"+std::to_string(gone)+",\"gone_camps\":\""+gone_camps+"\"}");
     return 1;
 }
 int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
@@ -474,13 +495,17 @@ int spawn_is_ready(const RC::LuaMadeSimple::Lua& lua) {
     return 1;
 }
 int spawn_stats(const RC::LuaMadeSimple::Lua& lua) {
-    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+",\"polls\":"+std::to_string(spawn_polls)+",\"level_changes\":"+std::to_string(spawn_level_changes)+"}");
+    lua.set_string("{\"seen\":"+std::to_string(spawn_seen)+",\"filled\":"+std::to_string(spawn_filled)+",\"refused\":"+std::to_string(spawn_refused)+",\"ready\":"+std::to_string(spawn_ready.size())+",\"polls\":"+std::to_string(spawn_polls)+",\"level_changes\":"+std::to_string(spawn_level_changes)+
+        ",\"actors_walked\":"+std::to_string(spawn_actors_walked)+",\"walk_ms_max\":"+std::to_string(spawn_walk_ms_max)+
+        ",\"walk_ms_total\":"+std::to_string(spawn_walk_ms_total)+"}");
     return 1;
 }
+// Milliseconds from a steady high-resolution clock, for timing the parts of a tick.
+int clock_ms(const RC::LuaMadeSimple::Lua& lua) {lua.set_number(clock_now_ms());return 1;}
 class Runtime : public RC::CppUserModBase {
     PersistentDispatch dispatch{window_thread};
 public:
-    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.0");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
+    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.1");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
     void on_unreal_init() override { dispatch.install(); }
     void on_update() override { dispatch.activate(); }
     void on_lua_stop(RC::StringViewType name,RC::LuaMadeSimple::Lua&,RC::LuaMadeSimple::Lua&,
@@ -494,6 +519,7 @@ public:
             state.register_function("BiomeRandomizerSpawnReady",spawn_is_ready);
             state.register_function("BiomeRandomizerSpawnPoll",spawn_poll);
             state.register_function("BiomeRandomizerSpawnStats",spawn_stats);
+            state.register_function("BiomeRandomizerClockMs",clock_ms);
             state.register_function("BiomeRandomizerTableStatus",table_status);
             state.register_function("BiomeRandomizerSetNext",set_next);
             state.register_function("BiomeRandomizerSetMany",set_many);

@@ -88,5 +88,10 @@ The Lua runs from a small native dispatcher on the game thread every 100 ms, on 
 done when something changes. Idle ticks don't look objects up or read tables. Objects are found once and cached. When the game
 quits, the dispatcher stops at the first quit event, before the world is torn down.
 
+When spawn levels arrive, the native poll names the camps that came with them. Only those camps' tables are prepared, at
+most one table a tick, and a table found once is kept for its later camps and for putting it back when its level leaves.
+A tick over 100 ms is logged at once, and the Lua logs a `slow_step` event that names which part took the time. A part
+that is a single game call can also hold other mods' queued game-thread work, which the engine runs inside it.
+
 The DLL checks the SHA-256 of the running `UE4SS.dll` before registering anything, because a C++ mod is tied to the exact loader
 build it was compiled against. On any other build the mod stays off and says so in `UE4SS.log`.

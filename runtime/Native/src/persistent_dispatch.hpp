@@ -36,6 +36,11 @@ class PersistentDispatch {
         unsigned long long calls{};
         double max_ms{};
         double total_ms{};
+        // Game events the engine processed while our tick was running. Other mods' queued game-thread
+        // work runs inside those, so a slow tick with many of them may not be this mod's own cost.
+        unsigned long long nested{};
+        Clock::time_point slow_logged{};
+        unsigned long long slow_unlogged{};
 #ifdef BIOME_DIAG
         // Diagnostic builds only: gaps between ProcessEvent calls on the game
         // thread approximate frame stalls, with the selector on or off.
@@ -83,6 +88,7 @@ class PersistentDispatch {
         }
 #endif
         std::unique_lock guard(shared->mutex,std::try_to_lock);
+        if(guard && shared->dispatching && GetCurrentThreadId()==shared->thread) {++shared->nested;return;}
         if(!guard || !shared->alive || shared->fault || shared->dispatching || shared->exiting ||
            !shared->current || !shared->thread || GetCurrentThreadId()!=shared->thread) return;
         const auto called=shared->name(reinterpret_cast<RC::Unreal::UObject*>(function));
@@ -100,8 +106,19 @@ class PersistentDispatch {
         try {
             if(Clock::now()>=shared->next) {
                 const auto started=Clock::now();
+                shared->nested=0;
                 lua->call_function("BiomeRandomizerTick",0,0);
                 const auto elapsed=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+                // Every build: a tick over 100 ms is logged at once (at most one line in 5 s), so a report
+                // shows when it happened. The Lua side logs which part of the tick took the time.
+                if(elapsed>100) {
+                    const auto at=Clock::now();
+                    if(at-shared->slow_logged>=std::chrono::seconds(5)) {
+                        log("slow_tick ms="+std::to_string(elapsed)+" nested_events="+std::to_string(shared->nested)+
+                            " unlogged_since_last="+std::to_string(shared->slow_unlogged));
+                        shared->slow_logged=at;shared->slow_unlogged=0;
+                    } else ++shared->slow_unlogged;
+                }
                 if(elapsed>shared->max_ms) shared->max_ms=elapsed;
                 shared->total_ms+=elapsed;
                 ++shared->calls;
