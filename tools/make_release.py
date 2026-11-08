@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MOD = "BiomeRandomizerRuntime"
 INSIDE = f"End/Binaries/Win64/ue4ss/Mods/{MOD}"
-SCRIPTS = ["main", "automatic", "lifecycle", "state_store", "biome_json", "world_pools", "config"]
+SCRIPTS = ["main", "automatic", "lifecycle", "state_store", "biome_json", "world_pools", "squads", "config"]
 
 
 def sha(data: bytes) -> str:
