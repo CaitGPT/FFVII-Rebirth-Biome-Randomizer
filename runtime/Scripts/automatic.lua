@@ -63,7 +63,7 @@ function M.new(config)
     local self={fault=nil,store=nil,apis={},next_step=0,pawnless=0,pawn_seen=false,fight=nil,loaded={},current={},
         camp_table={},camp_info={},assignment_of={},pending_unlocks={},tokens={},poll_at=0,chosen={},
         pending_tables={},found={},sections={},slow_reported_at=nil,slow_unreported=0,
-        gates={chapter_select=false,chapter=0}}
+        gates={chapter_select=false,chapter=0},active_units={}}
     local squad_percent=default_squad_percent
     if type(config.squad_percent)=='number' and config.squad_percent>=0 and config.squad_percent<=100 then
         squad_percent=config.squad_percent -- for testing; not in the shipped config
@@ -154,7 +154,8 @@ function M.new(config)
     local function roll(camp,cycle,k)
         local info=self.camp_info[camp];local names=info.entry.names;local unlocked=self.store.unlocked_set
         local tag=k>0 and ('~'..k) or ''
-        local squad=Squads.pool(info.entry.region,camp,self.gates)
+        local unit=Squads.unit(info.entry.region,camp);local active=unit and self.active_units[unit]
+        local squad=active and #active.types>0 and active.types or nil
         if squad and squad_percent>0 and pick(camp..'#squad'..tag,cycle,hundred)<=squad_percent then
             return squad_roll(camp,cycle,tag,squad)
         end
@@ -185,6 +186,48 @@ function M.new(config)
     end
     -- Point every camp in a loaded table at its chosen composition, and only once its spawn lists can
     -- hold that composition. A camp that isn't ready keeps the game's own enemies, which is always safe.
+    -- The squad types each loaded unit uses this visit. The game spawns only a couple of squad enemy types it
+    -- doesn't load for the area itself, so the units loaded at once share that budget: one unit alone gets two
+    -- types, two at once (Corel's halves) one each, and a unit arriving with the budget spent gets none this visit
+    -- (its camps stay monsters). A Sweeper is never a unit's only type. Each visit draws a new set.
+    local function choose_types(unit,pool,count,visit)
+        local left={};for _,v in ipairs(pool) do left[#left+1]=v end
+        local out={}
+        for i=1,count do
+            local candidates={}
+            for _,v in ipairs(left) do if not (count==1 and v==Squads.sweeper) then candidates[#candidates+1]=v end end
+            if #candidates==0 then break end
+            local chosen=pick('squadset:'..unit..'#'..i,visit,candidates);out[#out+1]=chosen
+            for k,v in ipairs(left) do if v==chosen then table.remove(left,k);break end end
+        end
+        table.sort(out)
+        return out
+    end
+    local function activate_units(index)
+        local entry=tables[index];local seen,fresh={},{}
+        for _,camp in ipairs(entry.camps) do
+            local unit=Squads.unit(entry.region,camp.id)
+            if unit and not seen[unit] then seen[unit]=true;if not self.active_units[unit] then fresh[#fresh+1]=unit end end
+        end
+        if #fresh==0 then return end
+        table.sort(fresh)
+        local used=0;for _,active in pairs(self.active_units) do used=used+#active.types end
+        local left=math.max(0,Squads.type_budget-used)
+        local each=left>=2*#fresh and 2 or (left>=#fresh and 1 or 0)
+        for k,unit in ipairs(fresh) do
+            local share=each>0 and each or (k<=left and 1 or 0)
+            local pool=Squads.unit_pool(unit,self.gates) or {}
+            local types={}
+            if share>0 and #pool>0 then types=choose_types(unit,pool,math.min(share,#pool),self.store:next_visit(unit)) end
+            self.active_units[unit]={types=types,table=index}
+            local names={};for _,v in ipairs(types) do names[#names+1]=Squads.resident[v+1] end
+            emit('squad_types',{unit=unit,types=names,budget_left=left})
+        end
+        self.chosen={} -- squad camps now draw from these types
+    end
+    local function release_units(index)
+        for unit,active in pairs(self.active_units) do if active.table==index then self.active_units[unit]=nil end end
+    end
     -- A table object, once found, is kept for the session and reused while it's valid, including on later
     -- visits: looking one up by its path took about 30 ms live, and every table at each arrival cost hundreds.
     -- The identity check in the table status and the token below still catch a table reloaded in its place.
@@ -207,6 +250,7 @@ function M.new(config)
             for target=1,#entry.camps do assert(status.choices[target]=='o','preexisting_reference_change') end
         end
         self.tokens[index]=token;self.loaded[index]=object
+        activate_units(index)
         local changed=0;local waiting=0;local lines={};local wanted={}
         local current={};for target=1,#entry.camps do current[target]=status.choices[target] end
         for target,camp in ipairs(entry.camps) do
@@ -250,6 +294,7 @@ function M.new(config)
     local function restore_table(index)
         local entry=tables[index]
         local object=self.loaded[index]
+        release_units(index)
         self.loaded[index]=nil;self.current[index]=nil;self.tokens[index]=nil
         if not valid(object) then return 0 end
         local status=json.decode(BiomeRandomizerTableStatus(object:GetAddress(),index-1))
@@ -472,6 +517,8 @@ function M.new(config)
     -- For the offline fixtures only: the composition a camp gets at a counter value.
     function self.choice_of_for_tests(camp,cycle) initialize();return choice_of(camp,cycle) end
     function self.read_gates_for_tests(db) read_gates(db) end
+    function self.activate_for_tests(index) initialize();activate_units(index) end
+    function self.release_for_tests(index) release_units(index) end
     return self
 end
 return M

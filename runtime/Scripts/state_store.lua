@@ -24,12 +24,18 @@ function M.new(options)
         document.unlocked=document.unlocked or {}
         assert(type(document.unlocked)=='table','state_unlocked_invalid')
         for _,name in ipairs(document.unlocked) do assert(type(name)=='string' and #name<=128,'state_unlocked_invalid') end
+        -- Added with squads: how many times each squad unit has been visited. Older files don't have it.
+        document.squad_visits=document.squad_visits or {}
+        assert(type(document.squad_visits)=='table','state_squad_visits_invalid')
+        for unit,count in pairs(document.squad_visits) do
+            assert(type(unit)=='string' and #unit<=64 and integer(count),'state_squad_visits_invalid')
+        end
     end
     local fresh=not document or (options.seed~='auto' and options.seed~=document.seed)
     if fresh then
         local seed=options.seed=='auto' and options.random_seed() or options.seed
         assert(type(seed)=='string' and #seed>0 and #seed<=128 and not seed:find('[%z\1-\31]'),'seed_unavailable')
-        document={version=1,algorithm=options.algorithm,scope=options.scope,seed=seed,cycles={},unlocked={}}
+        document={version=1,algorithm=options.algorithm,scope=options.scope,seed=seed,cycles={},unlocked={},squad_visits={}}
         for camp in pairs(options.pools) do document.cycles[camp]={cycle=0} end
     end
     local function persist()
@@ -50,6 +56,13 @@ function M.new(options)
         self.unlocked[#self.unlocked+1]=name;self.unlocked_set[name]=true
         persist_async()
         return true
+    end
+    -- A new visit to a squad unit: its count goes up and is saved, so the next visit draws another pair of types.
+    function self:next_visit(unit)
+        local count=(document.squad_visits[unit] or 0)+1
+        document.squad_visits[unit]=count
+        persist_async()
+        return count
     end
     -- Saves one camp's new counter on a background thread. A crash before it lands
     -- only means that camp rolls its previous choice again next time.

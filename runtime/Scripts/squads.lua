@@ -59,10 +59,15 @@ local function key_of(region,camp)
     end
     return region
 end
--- The resident template numbers a camp's squad can use, given what the loaded save allows, or nil.
+-- A squad unit: a region, or one of Corel's two halves. Each has its own pool; nil for camps without squads.
+function M.unit(region,camp)
+    local key=key_of(region,camp)
+    return key and pools[key] and key or nil
+end
+-- The resident template numbers a unit's squads may use, given what the loaded save allows, or nil.
 -- gates: {chapter_select=bool, chapter=number}
-function M.pool(region,camp,gates)
-    local key=key_of(region,camp);local entry=key and pools[key]
+function M.unit_pool(unit,gates)
+    local entry=unit and pools[unit]
     if not entry then return nil end
     local out={};for _,v in ipairs(entry.always or {}) do out[#out+1]=v end
     if gates.chapter_select then for _,v in ipairs(entry.chapter_select or {}) do out[#out+1]=v end end
@@ -72,4 +77,8 @@ function M.pool(region,camp,gates)
     table.sort(out)
     return #out>0 and out or nil
 end
+function M.pool(region,camp,gates) return M.unit_pool(M.unit(region,camp),gates) end
+-- The game spawns at most two squad enemy types it doesn't already load for the area: a camp naming a third
+-- spawns nothing (live 2026-11-08). So squads use at most this many types among everything loaded at once.
+M.type_budget=2
 return M

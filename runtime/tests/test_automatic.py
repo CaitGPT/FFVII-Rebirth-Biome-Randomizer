@@ -348,6 +348,24 @@ class Adapter(unittest.TestCase):
             assert(choices[0][1]~='o','camps not changed on the second visit')
         ''')
 
+    def test_squads_through_the_step_loop_use_two_types_and_free_them_on_leaving(self):
+        self.run_case('''
+            choices={[0]={'o','o'},[1]={'o'}};polled={};logs={}
+            local squads=Automatic.new({enabled=true,seed='613',squad_percent=100});for i=1,10 do squads:step() end
+            assert(not squads.fault,squads.fault)
+            local seen={}
+            for _,key in ipairs(choices[0]) do
+                assert(key:match('^t:r'),'not a squad: '..key)
+                for e in key:match('^t:([r%d%.]+)'):gmatch('r%d+') do seen[e]=true end
+            end
+            local n=0;for e in pairs(seen) do n=n+1;local k=tonumber(e:sub(2));assert(k>=14 and k<=18,'not a bandit '..e) end
+            assert(n>=1 and n<=2,'types: '..n)
+            assert(squads.active_units['1200-GRASA'] and #squads.active_units['1200-GRASA'].types==2)
+            spawn_ready={};for i=1,3 do squads:step() end
+            assert(squads.active_units['1200-GRASA']==nil,'budget not freed on leaving')
+            assert(choices[0][1]=='o','not restored')
+        ''')
+
     def test_save_flags_are_read_once_per_load(self):
         self.run_case('''
             spawn_ready.Grassland_mob_99=true;flag_reads=0

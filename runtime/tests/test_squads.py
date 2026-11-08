@@ -43,7 +43,7 @@ def lua_runtime(pools=POOLS):
     lua.execute('''BiomeRandomizerSHA256=function(s) return python_hash(s) end
         BiomeRandomizerReadState=function() return '',true end
         BiomeRandomizerWriteState=function() return true end
-        BiomeRandomizerWriteStateAsync=function() return true end
+        disk='';BiomeRandomizerWriteStateAsync=function(v) disk=v;return true end
         BiomeRandomizerRandomSeed=function() return '613' end
         logs={};function print(v) logs[#logs+1]=v end
         function FName(s) return {name=s} end''')
@@ -85,10 +85,29 @@ class Squads(unittest.TestCase):
                 self.assertEqual(pool(region, camp, True, 2), always | chapter_select | from_chapter)
         self.assertIsNone(squads.pool('2200-CORLA', 'Corla_other_mob_01', lua.table_from({'chapter_select': True, 'chapter': 14})))
 
-    def keys(self, lua, camp, cycles, percent=100, chapter_select=False, chapter=2):
+    # The fixture's tables: 1 is Junon, 2 is Corel (both halves).
+    TABLE = {'JunonArea_mob_01': 1, 'Corla_desert_mob_01': 2, 'Corla_southem_mob_01': 2, 'Corla_other_mob_01': 2}
+
+    def new(self, lua, percent=100, chapter_select=False, chapter=2):
         lua.execute(f"auto=Automatic.new({{enabled=true,seed='613',squad_percent={percent}}})")
-        lua.execute(f"auto.gates={{chapter_select={'true' if chapter_select else 'false'},chapter={chapter}}};auto.chosen={{}}")
+        lua.execute(f"auto.gates={{chapter_select={'true' if chapter_select else 'false'},chapter={chapter}}}")
+
+    def keys(self, lua, camp, cycles, percent=100, chapter_select=False, chapter=2, types=None):
+        self.new(lua, percent, chapter_select, chapter)
+        if types is None:
+            lua.execute(f"auto.activate_for_tests({self.TABLE[camp]})")
+        else:
+            unit = lua.eval(f"package.loaded.squads.unit(package.loaded.world_pools[{self.TABLE[camp]}].region,'{camp}')")
+            lua.execute(f"auto.choice_of_for_tests('{camp}',0);auto.active_units['{unit}']={{types={{{','.join(map(str, types))}}},table={self.TABLE[camp]}}};auto.chosen={{}}")
         return [lua.eval(f"auto.choice_of_for_tests('{camp}',{c})") for c in range(cycles)]
+
+    @staticmethod
+    def entries(keys):
+        return {e for k in keys for e in k[2:].split('/')[0].split('.')}
+
+    def active(self, lua, unit):
+        got = lua.eval(f"auto.active_units['{unit}']")
+        return None if got is None else sorted(got['types'].values())
 
     def test_a_squad_never_mixes_with_monsters_and_keeps_the_camp_range(self):
         lua = lua_runtime()
@@ -101,7 +120,7 @@ class Squads(unittest.TestCase):
 
     def test_at_most_one_sweeper_and_it_stands_alone(self):
         lua = lua_runtime();seen = 0
-        for key in self.keys(lua, 'JunonArea_mob_01', 400):
+        for key in self.keys(lua, 'JunonArea_mob_01', 400, types=[6, 10]):
             enemies, counts = re.match(r'^t:([r\d.]+)/c:([\d.]+)$', key).groups()
             enemies, counts = enemies.split('.'), counts.split('.')
             self.assertLessEqual(enemies.count('r10'), 1, key)
@@ -109,25 +128,66 @@ class Squads(unittest.TestCase):
                 seen += 1;self.assertEqual(counts[enemies.index('r10')], '1', key)
         self.assertGreater(seen, 0, 'the Sweeper never came up in 400 rolls')
 
-    def test_desert_and_coast_use_their_own_squads(self):
+    def test_a_squad_uses_only_its_units_active_types(self):
         lua = lua_runtime()
-        desert = {e for k in self.keys(lua, 'Corla_desert_mob_01', 200) for e in k[2:].split('/')[0].split('.')}
-        coast = {e for k in self.keys(lua, 'Corla_southem_mob_01', 200) for e in k[2:].split('/')[0].split('.')}
-        self.assertTrue(desert <= {f'r{n}' for n in range(14, 22)}, desert)
-        self.assertTrue(coast <= {'r0', 'r1', 'r4', 'r11', 'r13'}, coast)
+        self.assertEqual(self.entries(self.keys(lua, 'JunonArea_mob_01', 200, types=[6, 8])), {'r6', 'r8'})
+
+    def test_one_unit_alone_gets_two_types_from_its_pool(self):
+        lua = lua_runtime();self.new(lua)
+        lua.execute('auto.activate_for_tests(1)')
+        types = self.active(lua, '1300-JUNOA')
+        self.assertEqual(len(types), 2);self.assertTrue(set(types) <= {6, 8, 9, 10, 11}, types)
+
+    def test_corels_halves_share_the_budget_one_type_each(self):
+        lua = lua_runtime();self.new(lua)
+        lua.execute('auto.activate_for_tests(2)')
+        desert, coast = self.active(lua, '2200-CORLA:desert'), self.active(lua, '2200-CORLA:southern')
+        self.assertEqual(len(desert), 1);self.assertEqual(len(coast), 1)
+        self.assertTrue(set(desert) <= set(range(14, 22)), desert);self.assertTrue(set(coast) <= {0, 1, 4, 11, 13}, coast)
+        keys = self.keys(lua, 'Corla_desert_mob_01', 100)
+        self.assertEqual(len(self.entries(keys)), 1, keys[:5])
+
+    def test_a_unit_arriving_with_the_budget_spent_stays_monsters_until_freed(self):
+        lua = lua_runtime();self.new(lua)
+        lua.execute('auto.activate_for_tests(1);auto.activate_for_tests(2)')
+        self.assertEqual(self.active(lua, '2200-CORLA:desert'), []);self.assertEqual(self.active(lua, '2200-CORLA:southern'), [])
+        keys = [lua.eval(f"auto.choice_of_for_tests('Corla_desert_mob_01',{c})") for c in range(50)]
+        self.assertFalse(any(k.startswith('t:r') for k in keys), 'a squad without budget')
+        lua.execute('auto.release_for_tests(1);auto.release_for_tests(2);auto.activate_for_tests(2)')
+        self.assertEqual(len(self.active(lua, '2200-CORLA:desert')), 1)
+
+    def test_a_sweeper_is_never_a_units_only_type(self):
+        lua = lua_runtime();self.new(lua)
+        lua.execute('package.loaded.squads.type_budget=1')
+        for _ in range(60):
+            lua.execute('auto.release_for_tests(1);auto.activate_for_tests(1)')
+            self.assertNotEqual(self.active(lua, '1300-JUNOA'), [10])
+        lua.execute('package.loaded.squads.type_budget=2')
+
+    def test_each_visit_draws_again_and_the_count_is_saved(self):
+        lua = lua_runtime();self.new(lua);sets = set()
+        for _ in range(30):
+            lua.execute('auto.release_for_tests(1);auto.activate_for_tests(1)')
+            sets.add(tuple(self.active(lua, '1300-JUNOA')))
+        self.assertGreater(len(sets), 3, sets)
+        import json
+        self.assertEqual(json.loads(lua.eval('disk'))['squad_visits']['1300-JUNOA'], 30)
 
     def test_gated_enemies_appear_only_when_the_save_allows_them(self):
         lua = lua_runtime()
-        early = {e for k in self.keys(lua, 'JunonArea_mob_01', 300, chapter=4) for e in k[2:].split('/')[0].split('.')}
-        later = {e for k in self.keys(lua, 'JunonArea_mob_01', 300, chapter=5) for e in k[2:].split('/')[0].split('.')}
-        post = {e for k in self.keys(lua, 'JunonArea_mob_01', 300, chapter_select=True, chapter=3) for e in k[2:].split('/')[0].split('.')}
-        self.assertNotIn('r7', early);self.assertNotIn('r12', early)
-        self.assertIn('r7', later);self.assertNotIn('r12', later)
-        self.assertIn('r7', post);self.assertIn('r12', post)
+        def seen(**gates):
+            self.new(lua, **gates);out = set()
+            for _ in range(80):
+                lua.execute('auto.release_for_tests(1);auto.activate_for_tests(1)');out |= set(self.active(lua, '1300-JUNOA'))
+            return out
+        early, later, post = seen(chapter=4), seen(chapter=5), seen(chapter_select=True, chapter=3)
+        self.assertNotIn(7, early);self.assertNotIn(12, early)
+        self.assertIn(7, later);self.assertNotIn(12, later)
+        self.assertIn(7, post);self.assertIn(12, post)
 
     def test_about_one_roll_in_five_is_a_squad_by_default(self):
         lua = lua_runtime()
-        lua.execute("auto=Automatic.new({enabled=true,seed='613'})")
+        lua.execute("auto=Automatic.new({enabled=true,seed='613'});auto.activate_for_tests(1)")
         keys = [lua.eval(f"auto.choice_of_for_tests('JunonArea_mob_01',{c})") for c in range(1000)]
         share = sum(1 for k in keys if k.startswith('t:r')) / len(keys)
         self.assertGreater(share, 0.14);self.assertLess(share, 0.26)
