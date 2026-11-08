@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (not released yet)
+## 1.1.0 (2026-11-08)
 
 - Shinra and bandit squads: about one roll in five, a camp in Midgar's outskirts, the Grasslands, Junon, Corel or
   Nibelheim comes back as a squad of that region's humans or machines. Per-region lists from the owner's plan, Corel

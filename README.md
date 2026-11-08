@@ -7,7 +7,7 @@ An AI coding agent built this mod: Codex started it, Claude (Anthropic's model, 
 owner set the goals and judged the results. The [testing notes](docs/TESTING.md) say what was tried in the real game
 and what wasn't.
 
-[Download on Nexus Mods](https://www.nexusmods.com/finalfantasy7rebirth/mods/2489) · [GitHub release v1.0.0](https://github.com/CaitGPT/FFVII-Rebirth-Biome-Randomizer/releases/tag/v1.0.0) · [Watch the demonstration and build story](https://www.youtube.com/watch?v=_2Okhf8-NwM)
+[Download on Nexus Mods](https://www.nexusmods.com/finalfantasy7rebirth/mods/2489) · [GitHub release v1.1.0](https://github.com/CaitGPT/FFVII-Rebirth-Biome-Randomizer/releases/tag/v1.1.0) · [Watch the demonstration and build story](https://www.youtube.com/watch?v=_2Okhf8-NwM)
 
 ## What it does
 
