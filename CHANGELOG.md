@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.0.1 (not released yet)
+## 1.1.0 (not released yet)
+
+- Shinra and bandit squads: about one roll in five, a camp in Midgar's outskirts, the Grasslands, Junon, Corel or
+  Nibelheim comes back as a squad of that region's humans or machines. Per-region lists from the owner's plan, Corel
+  split into desert and southern coast, chapter-select extras, at most one J-Unit Sweeper. No squads in Gongaga or
+  Cosmo Canyon.
+- Squad enemies use the game's always-loaded simulator templates, which point at the ordinary field enemies, from a
+  reviewed list only.
+- Each region uses its measured number of squad types per visit (one or two), drawn again each visit.
 
 - Shorter stalls when camps load: only the tables of the camps that arrived are prepared, one table per tick, and a
   table found once is kept for the session rather than looked up again. Table rows are written with a guarded store

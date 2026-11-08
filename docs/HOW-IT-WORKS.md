@@ -79,6 +79,19 @@ assignment has been won. The mod knows that two ways:
 
 Unlocks are kept in the state file, so they belong to the install, not the save.
 
+## Squads
+
+Squad enemies come from the game's always-loaded Resident `EnemyTerritoryMob` table: 264 combat simulator templates
+(`mobcolvr_...`), each pointing at the ordinary field enemy's own spec. A composition names one as `r<n>`, an index into
+the reviewed list in `Native/src/resident_templates.hpp`; the native writer looks the name up without creating it and
+refuses anything else. `Scripts/squads.lua` holds which squads each region (or Corel half) may use, and when.
+
+A region spawns only a measured number of squad enemy types it doesn't load itself (`squads.type_budget`): past it, the
+first types asked for spawn and further ones spawn nothing for the whole visit. When a table is prepared, its units draw
+that many types from their pool, seeded by a visit counter kept in the state file, and their squads use only those.
+About one roll in five makes a camp a squad. The save's chapter (`GetChapterProgress`) and chapter select
+(`stfComn_Release_ChapterSelect`) gate the rest.
+
 ## State and timing
 
 `%LOCALAPPDATA%\FFVIIRebirthBiomeRandomizer\state-v1.json` holds the seed, each camp's counter and the unlocked fiends. It's

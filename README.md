@@ -15,6 +15,10 @@ and what wasn't.
 - **A random mix of that region's enemies.** Each slot in a camp picks its own enemy from the enemies that region's
   camps already use, so a Grasslands camp might come back as two Elfadunks and two Levrikons.
 - **A random number of enemies**, anywhere between the region's smallest and largest existing camp.
+- **Shinra and bandit squads.** About one roll in five, a camp comes back as a squad of the region's humans or machines
+  instead of monsters: Shinra troopers and machines around Midgar, Junon, Corel's southern coast and Nibelheim; bandits
+  in the Grasslands; bandits and thugs in the Corel desert. Some types appear only in chapter select. Each visit uses one
+  or two of a region's squad types.
 - **No immediate repeats.** A camp's new roll always differs from the one before it.
 - **Combat Assignments add to the pool.** Beat a region's Fiend Intel fiend (before or after installing) and it can
   start turning up in that region's ordinary camps.
@@ -36,10 +40,11 @@ a seed.
 ## Known issues
 
 - Unlocked assignment fiends belong to the install, not the save: loading an older save doesn't lock them again.
-- Loading a save takes up to half a second longer while the mod sets up the camp tables, behind the loading screen.
-- Agent play tests covered the Grasslands and Gongaga; the owner also playtested Corel. The owner's Corel report
-  does not specify individual cases. Respawns in Cosmo Canyon, Junon and Nibelheim have not been watched in play by us.
-  See [testing](docs/TESTING.md).
+- A region spawns only one or two squad enemy types it doesn't load itself, so each visit shows one or two of its squad
+  types. We measured each region's number and the mod keeps to it.
+- Squads were watched spawning and fighting in Midgar's outskirts, the Grasslands, Junon, Corel and Nibelheim; the
+  Flametrooper was filmed in Midgar's outskirts but not seen in Nibelheim. Respawns in Cosmo Canyon, Junon and Nibelheim
+  have not been watched in play by us. See [testing](docs/TESTING.md).
 - Mixes can be harder than the camp they replace, and big enemies can turn up in tight spots. That's the point, but
   expect the odd strange-looking camp.
 

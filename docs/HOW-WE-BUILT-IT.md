@@ -169,9 +169,60 @@ would mean new rows and new level actors, which is exactly the kind of change th
 unused camp arenas to reuse either. So this version doesn't add camps. Difficulty caps, rare elites and settings were left out on
 purpose.
 
+## Step 17: version 1.1, and a stall someone else measured
+
+After release, another Claude session was measuring frame drops in the menus with the mod installed. It saw this mod's
+tick take 871 and 965 milliseconds. Our own debug logs from earlier tests had the same shape: spikes of 400 to 1270
+milliseconds, but only now and then.
+
+There were two kinds. The first was ours. Every time a camp's spawn level arrived, the mod looked up all seven region tables
+by path, including the six that weren't loaded, and prepared every one. A lookup by path cost about 30 milliseconds in the
+game, and writing a table's rows cost far more than it should: `WriteProcessMemory` flushed the instruction cache on every
+8-byte write. The fix prepares only the tables of the camps that arrived, one per tick, keeps every table it finds, and
+writes into the already checked page directly, still reading the whole table back. Measured on the same load, the stalls
+with the mod matched the stalls without it.
+
+The second kind wasn't ours. The slowest ticks all sat inside one game call, the one that asks for the player, with up to
+2,400 other game events run inside it. The game runs other mods' queued work there, and our test harness queues a lot. With
+the harness off, players don't have it. The mod now logs any slow tick with the part that took the time, so the next report
+can tell.
+
+## Step 18: Shinra and bandits in the open world
+
+The owner asked for Shinra troopers, machines and bandits in the open world, as squads rather than mixed in with monsters,
+with a different selection per region and some saved for chapter select. Most of those enemies had no template in any region's
+camp table. Pointing a Gongaga camp at the Gongaga reactor's Slug-Ray template crashed the game four seconds later: that
+template's row only exists while the reactor's table is loaded.
+
+The way in was a table that is always loaded. The game keeps 264 combat simulator templates in a resident table, and each
+points at the ordinary field enemy, not a simulator copy. Named from a camp, they spawned looking exactly like the field
+enemies, fought, and counted. The release names them only from a reviewed list, looks each name up without ever creating one,
+and still reads the whole table back after writing.
+
+The rest follows the owner's plan: about one roll in five makes a camp a squad, at most one J-Unit Sweeper per squad, and
+Corel split into its desert (bandits and thugs) and its southern coast (Shinra). Chapter select is the game's own flag for it
+being released, which it sets when Chapter 14 is cleared, and Junon's Elite Security Officers wait for Chapter 5.
+
+## Step 19: the camps that came out short
+
+In the first world-wide test, with every camp a squad, some camps were missing members. The scans give each enemy's template
+and camp, so we compared every camp with what the seed says it should hold. Some slots spawned and others in the same camp
+didn't, and only a couple of enemy types ever appeared per region. Asking for one type, it spawned everywhere.
+
+We first called it a limit of two types. Then Gongaga, Cosmo Canyon and Nibelheim managed only one, and the owner didn't
+believe a rule like that would be in the game. Neither of us could say why regions would differ, so we tested it. The pair that
+failed in Gongaga worked perfectly in Junon. In Gongaga the first type asked for won for the whole visit: from the south gate
+the bandits appeared and the thugs didn't, and from the airstrip the reverse. Two small enemies failed as surely as two large
+ones, three types in Junon gave two, and timing made no difference. The game's own cause is still unknown. The mod now uses
+each region's measured number, and the owner took bandits and thugs out of Gongaga and Cosmo Canyon, which didn't suit a jungle.
+
+We also got a measurement wrong on the way. The southern coast's camps looked empty because we stood on a beach below the
+cliff, where they hadn't spawned yet. Seen from the top they were full.
+
 ## What it doesn't do
 
-It doesn't add camps or change where they are. Equal levels don't mean equal difficulty: a camp of one Mu can become four
+It doesn't add camps or change where they are. Squads in a region are limited to the number of enemy types that region
+spawns reliably, so each visit shows one or two of its squad types, not all of them. Equal levels don't mean equal difficulty: a camp of one Mu can become four
 Levrikons, and that's the point, but some mixes are much harder than what they replaced. Our tests are listed in
 [TESTING.md](TESTING.md), including the ones that failed.
 

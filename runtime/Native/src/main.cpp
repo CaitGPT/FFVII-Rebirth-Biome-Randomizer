@@ -545,7 +545,7 @@ int clock_ms(const RC::LuaMadeSimple::Lua& lua) {lua.set_number(clock_now_ms());
 class Runtime : public RC::CppUserModBase {
     PersistentDispatch dispatch{window_thread};
 public:
-    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.0.1");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
+    Runtime() { ModName=STR("BiomeRandomizerRuntime");ModVersion=STR("1.1.0");ModAuthors=STR("Cait GPT (built by AI)");ModDescription=STR("Guarded seeded existing-camp respawn selector"); }
     void on_unreal_init() override { dispatch.install(); }
     void on_update() override { dispatch.activate(); }
     void on_lua_stop(RC::StringViewType name,RC::LuaMadeSimple::Lua&,RC::LuaMadeSimple::Lua&,

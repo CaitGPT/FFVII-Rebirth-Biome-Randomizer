@@ -41,6 +41,26 @@ timer and streaming decide when that happens: you normally need to leave the are
   fiend is a single named enemy qualify: 31 across the seven regions.
 - Levels stay with the camp: a swapped-in enemy gets the level the camp's own enemies had.
 
+### Squads (1.1.0)
+
+About one roll in five, a camp in a region with squads comes back as a squad instead of monsters:
+
+| Region | Squads | Chapter select adds |
+| --- | --- | --- |
+| Midgar outskirts | Security Officer, Grenadier, Slug-Ray | Riot Trooper, Flametrooper, Type G Slug-Ray |
+| Grasslands | Bandits | |
+| Junon | Junon Security Officer, Grenadier and Riot Trooper, J-Unit Sweeper, Slug-Ray | Type G Slug-Ray |
+| Corel desert | Bandits, Thugs | |
+| Corel southern coast | Security Officer, Grenadier, Flametrooper, Slug-Ray, Scrutineye | Elite Grenadier, Type G Slug-Ray |
+| Nibelheim | Security Officer, Grenadier, Riot Trooper, Flametrooper, Scrutineye, Slug-Ray, J-Unit Sweeper | 2-C SOLDIER Operator, Type G Slug-Ray |
+
+Junon's Elite Security Officer joins from Chapter 5, or in chapter select. Chapter select counts once Chapter 14 has been
+cleared. A squad has at most one J-Unit Sweeper. Gongaga and Cosmo Canyon have no squads.
+
+The game spawns only one or two squad enemy types per region at a time, so each visit draws that many from the region's
+list: two in Midgar's outskirts, the Grasslands and Junon, one each for Corel's desert and coast, one in Nibelheim. The next
+visit draws again.
+
 What isn't changed: story battles, side-quest fights, the Combat Assignments themselves, bosses, hunts, Chadley's
 simulator, Queen's Blood, Colosseum fights, minigames, towns, dungeons and interiors.
 
