@@ -42,7 +42,7 @@ a seed.
 - Unlocked assignment fiends belong to the install, not the save: loading an older save doesn't lock them again.
 - A region spawns only one or two squad enemy types it doesn't load itself, so each visit shows one or two of its squad
   types. We measured each region's number and the mod keeps to it.
-- Squads were watched spawning and fighting in Midgar's outskirts, the Grasslands, Junon, Corel and Nibelheim; the
+- Squads were fought in Midgar's outskirts, the Grasslands and Junon, and watched spawning in Corel and Nibelheim. The
   Flametrooper was filmed in Midgar's outskirts but not seen in Nibelheim. Respawns in Cosmo Canyon, Junon and Nibelheim
   have not been watched in play by us. See [testing](docs/TESTING.md).
 - Mixes can be harder than the camp they replace, and big enemies can turn up in tight spots. That's the point, but
