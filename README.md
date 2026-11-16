@@ -59,6 +59,10 @@ More in the [guide](docs/GUIDE.md#known-issues).
 - [Building from source](runtime/BUILDING.md)
 - [Changelog](CHANGELOG.md)
 
+## Requests
+
+We take requests: changes to this mod, or ideas for new Rebirth mods. Open an issue here, or post on the [Nexus page](https://www.nexusmods.com/finalfantasy7rebirth/mods/2489?tab=posts).
+
 ## Licence
 
 The source code is MIT licensed ([LICENSE](LICENSE)). The repository contains no game files. The camp lists in
